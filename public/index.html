@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aero Engine Digital Twin | SIH</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛩️</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="bg-grid"></div>
+
+  <div class="classification-strip">
+    <span>UNCLASSIFIED // SIH DEMONSTRATION BUILD</span>
+    <span>SIMULATED TELEMETRY — NOT FOR OPERATIONAL USE</span>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">✈</div>
+      <div class="brand-text">
+        <h1>Aero Engine Digital Twin <span class="sys-tag">SYS/DT&#8209;04</span></h1>
+        <p>Real-Time Health Monitoring &amp; Fault Prediction — Aero Piston Engines, MALE UAV Fleet</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="badge-strip" title="Smart India Hackathon prototype">
+        <span class="chip chip-saffron"></span><span class="chip chip-white"></span><span class="chip chip-green"></span>
+        <span class="sih-label">SIH Prototype</span>
+      </div>
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="conn" id="connStatus"><span class="dot"></span><span class="conn-text">Connecting…</span></div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- Fleet summary -->
+    <section class="fleet-summary">
+      <div class="stat-card">
+        <div class="stat-label">Mission Reliability</div>
+        <div class="stat-value" id="statReliability">--%</div>
+        <div class="stat-bar"><div class="stat-bar-fill" id="statReliabilityBar"></div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Avg Fleet Health</div>
+        <div class="stat-value" id="statHealth">--%</div>
+        <div class="stat-bar"><div class="stat-bar-fill health" id="statHealthBar"></div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Engines // Critical</div>
+        <div class="stat-value" id="statCritical">0</div>
+        <div class="stat-sub">of fleet total</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">UAVs Monitored</div>
+        <div class="stat-value" id="statEngines">3</div>
+        <div class="stat-sub">live telemetry link</div>
+      </div>
+    </section>
+
+    <!-- Engine picker cards -->
+    <section class="engine-cards" id="engineCards"></section>
+
+    <div class="main-grid">
+      <!-- Sensor detail -->
+      <section class="panel detail-panel">
+        <div class="panel-head">
+          <h2 id="detailTitle">Engine Detail</h2>
+          <span class="badge" id="detailStatus">NOMINAL</span>
+        </div>
+
+        <div class="ai-analysis" id="aiAnalysisBox">
+          <div class="ai-head">
+            <h3><span class="ai-tag">AI</span> Engine Situation Report</h3>
+            <button class="ai-refresh-btn" id="aiRefreshBtn" type="button" title="Ask Gemini to re-analyze this engine right now">Explain now</button>
+          </div>
+          <p class="ai-text" id="aiText">Waiting for the first AI analysis…</p>
+          <div class="ai-meta" id="aiMeta"></div>
+        </div>
+
+        <div class="predicted-fault" id="predictedFaultBox" hidden>
+          <div class="pf-icon">⚠</div>
+          <div>
+            <div class="pf-title" id="pfTitle">—</div>
+            <div class="pf-sub" id="pfSub">—</div>
+          </div>
+          <div class="pf-confidence" id="pfConfidence">0%</div>
+        </div>
+
+        <div class="engine-diagram-wrap">
+          <div class="engine-diagram-head">
+            <h3>Rotax&#8209;912 iS // Live Component Map</h3>
+            <div class="engine-legend">
+              <span><i class="dot nominal"></i>Nominal</span>
+              <span><i class="dot warning"></i>Warning</span>
+              <span><i class="dot critical"></i>Critical</span>
+            </div>
+          </div>
+          <svg class="engine-svg" viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Aero piston engine diagram with live status glow per component">
+            <defs>
+              <linearGradient id="gradMetal" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#e2e7ee"/>
+                <stop offset="0.5" stop-color="#b7c0cf"/>
+                <stop offset="1" stop-color="#8b95a5"/>
+              </linearGradient>
+              <linearGradient id="gradMetalDark" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#9aa5b4"/>
+                <stop offset="1" stop-color="#5b6577"/>
+              </linearGradient>
+              <linearGradient id="gradDark" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#3a4354"/>
+                <stop offset="1" stop-color="#1c2330"/>
+              </linearGradient>
+              <linearGradient id="gradRubber" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#3a3f47"/>
+                <stop offset="1" stop-color="#14171c"/>
+              </linearGradient>
+              <pattern id="finPatternH" width="9" height="9" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="0" x2="9" y2="0" stroke="#5b6577" stroke-width="2.4"/>
+              </pattern>
+              <pattern id="finPatternV" width="9" height="9" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="0" x2="0" y2="9" stroke="#5b6577" stroke-width="2.4"/>
+              </pattern>
+              <filter id="glowNominal" x="-80%" y="-80%" width="260%" height="260%">
+                <feDropShadow dx="0" dy="0" stdDeviation="3.2" flood-color="#22c55e" flood-opacity="0.85"/>
+              </filter>
+              <filter id="glowWarning" x="-80%" y="-80%" width="260%" height="260%">
+                <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ff9d1f" flood-opacity="0.95"/>
+              </filter>
+              <filter id="glowCritical" x="-100%" y="-100%" width="300%" height="300%">
+                <feDropShadow dx="0" dy="0" stdDeviation="7" flood-color="#ff3b30" flood-opacity="1"/>
+              </filter>
+            </defs>
+
+            <ellipse cx="380" cy="400" rx="330" ry="14" fill="#0b2545" opacity="0.08"/>
+
+            <!-- Crankcase / vibration -->
+            <g id="part-vibration" class="engine-part">
+              <title>Vibration: -- mm/s</title>
+              <rect class="pshape" x="190" y="182" width="380" height="56" rx="16" fill="url(#gradMetal)"/>
+              <rect x="190" y="182" width="380" height="56" rx="16" fill="url(#finPatternH)" opacity="0.25"/>
+              <circle cx="230" cy="210" r="4" fill="#5b6577"/>
+              <circle cx="290" cy="210" r="4" fill="#5b6577"/>
+              <circle cx="380" cy="210" r="4" fill="#5b6577"/>
+              <circle cx="470" cy="210" r="4" fill="#5b6577"/>
+              <circle cx="530" cy="210" r="4" fill="#5b6577"/>
+            </g>
+
+            <!-- Gearbox + prop flange / RPM -->
+            <g id="part-rpm" class="engine-part">
+              <title>Engine Speed: -- RPM</title>
+              <rect class="pshape" x="118" y="164" width="88" height="92" rx="16" fill="url(#gradMetal)"/>
+              <g class="prop-spin">
+                <ellipse cx="98" cy="210" rx="46" ry="7" fill="#3a4354" opacity="0.55" transform="rotate(35 98 210)"/>
+                <ellipse cx="98" cy="210" rx="46" ry="7" fill="#3a4354" opacity="0.55" transform="rotate(-35 98 210)"/>
+              </g>
+              <circle class="pshape" cx="98" cy="210" r="40" fill="url(#gradMetalDark)"/>
+              <circle cx="98" cy="210" r="27" fill="none" stroke="#3a4354" stroke-width="1"/>
+              <circle cx="98" cy="188" r="3" fill="#3a4354"/>
+              <circle cx="118" cy="222" r="3" fill="#3a4354"/>
+              <circle cx="78" cy="222" r="3" fill="#3a4354"/>
+              <circle class="pshape" cx="98" cy="210" r="13" fill="url(#gradDark)"/>
+            </g>
+
+            <!-- Accessory case: alternator + battery -->
+            <g id="part-batteryVoltage" class="engine-part">
+              <title>Battery Voltage: -- V</title>
+              <rect class="pshape" x="572" y="176" width="104" height="68" rx="14" fill="url(#gradMetal)"/>
+              <circle class="pshape" cx="605" cy="168" r="19" fill="url(#gradMetalDark)"/>
+              <circle cx="605" cy="168" r="13" fill="none" stroke="#5b6577" stroke-width="1"/>
+              <circle cx="605" cy="168" r="7" fill="none" stroke="#5b6577" stroke-width="1"/>
+              <rect class="pshape" x="686" y="196" width="42" height="52" rx="5" fill="url(#gradDark)"/>
+              <circle cx="696" cy="206" r="2.6" fill="#c8cfdb"/>
+              <circle cx="710" cy="206" r="2.6" fill="#c8cfdb"/>
+              <text x="691" y="230" font-size="11" fill="#c8cfdb" font-weight="700">+</text>
+              <text x="706" y="230" font-size="11" fill="#c8cfdb" font-weight="700">-</text>
+            </g>
+
+            <!-- 4 cylinders (boxer pairs) / CHT -->
+            <g id="part-cht" class="engine-part">
+              <title>Cylinder Head Temp: -- &#176;C</title>
+              <rect class="pshape" x="269" y="94" width="46" height="88" rx="8" fill="url(#gradMetal)"/>
+              <rect x="269" y="94" width="46" height="88" rx="8" fill="url(#finPatternH)" opacity="0.3"/>
+              <rect class="pshape" x="259" y="76" width="66" height="24" rx="7" fill="url(#gradMetalDark)"/>
+              <rect class="pshape" x="269" y="238" width="46" height="88" rx="8" fill="url(#gradMetal)"/>
+              <rect x="269" y="238" width="46" height="88" rx="8" fill="url(#finPatternH)" opacity="0.3"/>
+              <rect class="pshape" x="259" y="320" width="66" height="24" rx="7" fill="url(#gradMetalDark)"/>
+              <rect class="pshape" x="435" y="94" width="46" height="88" rx="8" fill="url(#gradMetal)"/>
+              <rect x="435" y="94" width="46" height="88" rx="8" fill="url(#finPatternH)" opacity="0.3"/>
+              <rect class="pshape" x="425" y="76" width="66" height="24" rx="7" fill="url(#gradMetalDark)"/>
+              <rect class="pshape" x="435" y="238" width="46" height="88" rx="8" fill="url(#gradMetal)"/>
+              <rect x="435" y="238" width="46" height="88" rx="8" fill="url(#finPatternH)" opacity="0.3"/>
+              <rect class="pshape" x="425" y="320" width="66" height="24" rx="7" fill="url(#gradMetalDark)"/>
+              <circle cx="252" cy="86" r="6" fill="#c17f4a"/>
+              <circle cx="252" cy="330" r="6" fill="#c17f4a"/>
+              <circle cx="418" cy="86" r="6" fill="#c17f4a"/>
+              <circle cx="418" cy="330" r="6" fill="#c17f4a"/>
+            </g>
+
+            <!-- Exhaust headers / EGT -->
+            <g id="part-egt" class="engine-part">
+              <title>Exhaust Gas Temp: -- &#176;C</title>
+              <path class="pshape" d="M292 182 Q 258 245 244 300" fill="none" stroke="url(#gradRubber)" stroke-width="9" stroke-linecap="round"/>
+              <path class="pshape" d="M292 238 Q 258 275 244 300" fill="none" stroke="url(#gradRubber)" stroke-width="9" stroke-linecap="round"/>
+              <path class="pshape" d="M458 182 Q 424 250 414 300" fill="none" stroke="url(#gradRubber)" stroke-width="9" stroke-linecap="round"/>
+              <path class="pshape" d="M458 238 Q 424 275 414 300" fill="none" stroke="url(#gradRubber)" stroke-width="9" stroke-linecap="round"/>
+              <path class="pshape" d="M414 300 L244 300 Q160 300 138 340 Q118 370 72 382" fill="none" stroke="url(#gradRubber)" stroke-width="11" stroke-linecap="round"/>
+              <circle class="pshape" cx="68" cy="384" r="9" fill="url(#gradDark)"/>
+            </g>
+
+            <!-- Oil sump / oil pressure -->
+            <g id="part-oilPressure" class="engine-part">
+              <title>Oil Pressure: -- psi</title>
+              <path class="pshape" d="M300 238 L460 238 L442 272 L318 272 Z" fill="url(#gradMetalDark)"/>
+              <circle cx="380" cy="266" r="4" fill="#3a4354"/>
+            </g>
+
+            <!-- Oil cooler / oil temp -->
+            <g id="part-oilTemp" class="engine-part">
+              <title>Oil Temperature: -- &#176;C</title>
+              <path class="pshape" d="M330 272 Q 210 306 150 328" fill="none" stroke="url(#gradRubber)" stroke-width="6" stroke-linecap="round"/>
+              <rect class="pshape" x="116" y="330" width="58" height="38" rx="4" fill="url(#gradMetal)"/>
+              <rect x="116" y="330" width="58" height="38" rx="4" fill="url(#finPatternV)" opacity="0.35"/>
+            </g>
+
+            <!-- Carbs + fuel tank / fuel flow -->
+            <g id="part-fuelFlow" class="engine-part">
+              <title>Fuel Flow: -- L/h</title>
+              <rect class="pshape" x="345" y="40" width="56" height="26" rx="5" fill="url(#gradMetal)"/>
+              <path d="M373 66 L370 100 Q368 128 366 144" fill="none" stroke="#c17f4a" stroke-width="3.5" stroke-linecap="round"/>
+              <rect class="pshape" x="349" y="150" width="34" height="32" rx="6" fill="url(#gradMetalDark)"/>
+              <circle class="pshape" cx="350" cy="160" r="15" fill="url(#gradMetal)"/>
+              <circle class="pshape" cx="382" cy="160" r="15" fill="url(#gradMetal)"/>
+            </g>
+
+            <!-- Intake manifold / manifold pressure -->
+            <g id="part-manifoldPressure" class="engine-part">
+              <title>Manifold Pressure: -- kPa</title>
+              <path class="pshape" d="M330 82 L330 344" fill="none" stroke="#c8cfdb" stroke-width="7" stroke-linecap="round"/>
+              <path class="pshape" d="M496 82 L496 344" fill="none" stroke="#c8cfdb" stroke-width="7" stroke-linecap="round"/>
+              <path class="pshape" d="M366 175 L366 210 L330 210" fill="none" stroke="#c8cfdb" stroke-width="6" stroke-linecap="round"/>
+              <path class="pshape" d="M366 175 L366 210 L496 210" fill="none" stroke="#c8cfdb" stroke-width="6" stroke-linecap="round"/>
+            </g>
+          </svg>
+          <p class="engine-diagram-caption">HOVER ANY COMPONENT FOR ITS LIVE READING — GLOW COLOUR MIRRORS SENSOR STATUS BELOW</p>
+        </div>
+
+        <div class="sensor-grid" id="sensorGrid"></div>
+
+        <div class="chart-row">
+          <div class="chart-box">
+            <h3>Cylinder Head &amp; Exhaust Gas Temperature</h3>
+            <canvas id="chartTemp" height="140"></canvas>
+          </div>
+          <div class="chart-box">
+            <h3>Oil Pressure &amp; Vibration</h3>
+            <canvas id="chartOilVib" height="140"></canvas>
+          </div>
+        </div>
+
+        <div class="flight-strip">
+          <div><span>Altitude</span><strong id="fAlt">-- m</strong></div>
+          <div><span>Airspeed</span><strong id="fSpd">-- km/h</strong></div>
+          <div><span>Engine Hours</span><strong id="fHrs">--</strong></div>
+          <div><span>Est. Remaining Useful Life</span><strong id="fRul">-- h</strong></div>
+        </div>
+      </section>
+
+      <!-- Alerts feed -->
+      <section class="panel alerts-panel">
+        <div class="panel-head">
+          <h2>Fault Prediction / Alert Log</h2>
+          <span class="live-dot">● LIVE</span>
+        </div>
+        <div class="alerts-list" id="alertsList">
+          <div class="alerts-empty">Waiting for telemetry…</div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="footer">
+    FIG. 1 — SIMULATED TELEMETRY, DEMONSTRATION BUILD (SMART INDIA HACKATHON PROTOTYPE) · NOT CONNECTED TO A REAL UAV OR FADEC BUS
+  </footer>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
