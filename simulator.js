@@ -24,6 +24,15 @@
 
 'use strict';
 
+const {
+  computeHealthIndex,
+  MultivariateAnomalyDetector,
+  estimateRUL,
+  deriveRulFeatures,
+  explain,
+  recommend,
+} = require('./analytics');
+
 // ---- Sensor definitions -------------------------------------------------
 // Nominal operating band + warning/critical thresholds, loosely modelled on
 // a Rotax-912-class four-stroke piston engine as used on MALE UAVs
@@ -117,6 +126,14 @@ class EngineTwin {
     this.healthScore = 100;
     this.rul = 500; // remaining useful life, engine hours (sim)
     this.tick = 0;
+
+    // Advanced analytics/ layer (rate-aware health index, multivariate
+    // anomaly detection, RUL, explainability) — additive to the rule/z-score
+    // model above, not a replacement for it.
+    this.anomalyDetector = new MultivariateAnomalyDetector();
+    this.warmupSamples = [];
+    this.healthScoreHistory = [];
+    this.anomalyScoreHistory = [];
   }
 
   maybeStartFault() {
@@ -303,6 +320,8 @@ class EngineTwin {
     this.healthScore = prediction.health;
     this.maybeRaiseAlert(readings, prediction);
 
+    const analyticsResult = this.computeAdvancedAnalytics(readings);
+
     return {
       id: this.meta.id,
       tail: this.meta.tail,
@@ -318,6 +337,52 @@ class EngineTwin {
       activeFault: this.activeFault ? { type: this.activeFault.type, label: FAULT_TYPES[this.activeFault.type].label } : null,
       predictedFault: prediction.predictedFault,
       alerts: this.alerts.slice(0, 8),
+      analytics: analyticsResult,
+    };
+  }
+
+  // Rate-aware health index + multivariate anomaly detection + RUL +
+  // explainability, layered on top of the simpler rule/z-score model above.
+  // The anomaly detector warms up on a rolling buffer of samples taken while
+  // the engine looks healthy (no active fault, high legacy health score) —
+  // fitting it on live "healthy" telemetry the same way a real deployment
+  // would calibrate against a known-good baseline before trusting deviations.
+  computeAdvancedAnalytics(readings) {
+    const looksHealthy = !this.activeFault && this.healthScore >= 90;
+    if (!this.anomalyDetector.fitted) {
+      if (looksHealthy) {
+        this.warmupSamples.push({ ...readings });
+        if (this.warmupSamples.length > 40) this.warmupSamples.shift();
+        if (this.warmupSamples.length >= 20) this.anomalyDetector.fit(this.warmupSamples);
+      }
+    } else if (looksHealthy) {
+      this.anomalyDetector.adapt(readings, 0.01);
+    }
+
+    const healthIndex = computeHealthIndex(this.history);
+    const anomaly = this.anomalyDetector.fitted
+      ? this.anomalyDetector.score(readings)
+      : { score: 0, contributions: [] };
+
+    this.healthScoreHistory.push(healthIndex.healthScore);
+    if (this.healthScoreHistory.length > 60) this.healthScoreHistory.shift();
+    this.anomalyScoreHistory.push(anomaly.score);
+    if (this.anomalyScoreHistory.length > 60) this.anomalyScoreHistory.shift();
+
+    const rulFeatures = deriveRulFeatures(this.healthScoreHistory, this.anomalyScoreHistory);
+    const rul = estimateRUL(rulFeatures);
+    const explanation = explain({ contributions: anomaly.contributions, flags: healthIndex.flags });
+    const recommendation = recommend({ flags: healthIndex.flags, rul });
+
+    return {
+      healthScore: healthIndex.healthScore,
+      flags: healthIndex.flags,
+      trends: healthIndex.trends,
+      anomalyScore: Number(anomaly.score.toFixed(2)),
+      anomalyDetectorFitted: this.anomalyDetector.fitted,
+      rul,
+      explanation,
+      recommendation,
     };
   }
 

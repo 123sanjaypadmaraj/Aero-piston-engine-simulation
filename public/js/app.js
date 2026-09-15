@@ -1,26 +1,26 @@
 /**
  * app.js — dashboard client logic.
  * Connects to the Socket.IO stream for live (spoofed) telemetry and
- * renders fleet stats, per-engine sensor cards, trend charts and the
+ * renders fleet stats, the live engine diagram, trend charts and the
  * fault-prediction alert feed. Falls back to REST polling if the
  * websocket connection is ever unavailable.
  */
 (function () {
   'use strict';
 
-  // Mirrors simulator.js SENSORS — used only to scale the little progress
-  // bars on each sensor card (the nominal/warning/critical *status* itself
-  // always comes from the backend payload, never recomputed client-side).
+  // Mirrors simulator.js SENSORS — label/unit text for the engine diagram's
+  // hover tooltips (the nominal/warning/critical *status* itself always
+  // comes from the backend payload, never recomputed client-side).
   const SENSOR_META = {
-    rpm: { label: 'Engine Speed', unit: 'RPM', barMin: 3600, barMax: 6300 },
-    cht: { label: 'Cylinder Head Temp', unit: '°C', barMin: 60, barMax: 190 },
-    egt: { label: 'Exhaust Gas Temp', unit: '°C', barMin: 550, barMax: 850 },
-    oilPressure: { label: 'Oil Pressure', unit: 'psi', barMin: 20, barMax: 70 },
-    oilTemp: { label: 'Oil Temperature', unit: '°C', barMin: 60, barMax: 140 },
-    fuelFlow: { label: 'Fuel Flow', unit: 'L/h', barMin: 4, barMax: 22 },
-    vibration: { label: 'Vibration', unit: 'mm/s', barMin: 0, barMax: 5 },
-    manifoldPressure: { label: 'Manifold Pressure', unit: 'kPa', barMin: 60, barMax: 112 },
-    batteryVoltage: { label: 'Battery Voltage', unit: 'V', barMin: 11, barMax: 15 },
+    rpm: { label: 'Engine Speed', unit: 'RPM' },
+    cht: { label: 'Cylinder Head Temp', unit: '°C' },
+    egt: { label: 'Exhaust Gas Temp', unit: '°C' },
+    oilPressure: { label: 'Oil Pressure', unit: 'psi' },
+    oilTemp: { label: 'Oil Temperature', unit: '°C' },
+    fuelFlow: { label: 'Fuel Flow', unit: 'L/h' },
+    vibration: { label: 'Vibration', unit: 'mm/s' },
+    manifoldPressure: { label: 'Manifold Pressure', unit: 'kPa' },
+    batteryVoltage: { label: 'Battery Voltage', unit: 'V' },
   };
 
   const state = {
@@ -47,11 +47,6 @@
   }
 
   // ---------------- Rendering ----------------
-  function pctInRange(value, [lo, hi]) {
-    if (hi <= lo) return 0;
-    return Math.max(0, Math.min(100, ((value - lo) / (hi - lo)) * 100));
-  }
-
   function renderFleetSummary(payload) {
     const { fleet } = payload;
     el('statReliability').textContent = fleet.missionReliability + '%';
@@ -92,34 +87,18 @@
     });
   }
 
-  function renderSensorGrid(engine) {
-    const grid = el('sensorGrid');
-    grid.innerHTML = '';
-    Object.entries(SENSOR_META).forEach(([key, meta]) => {
-      const value = engine.readings[key];
-      const status = engine.statuses[key];
-      const pct = pctInRange(value, [meta.barMin, meta.barMax]);
-      const card = document.createElement('div');
-      card.className = `sensor-card ${status}`;
-      card.innerHTML = `
-        <div class="s-label">${meta.label}</div>
-        <div class="s-value">${value} <small>${meta.unit}</small></div>
-        <div class="s-bar"><div class="s-bar-fill" style="width:${pct}%"></div></div>`;
-      grid.appendChild(card);
-    });
-  }
-
   function renderEngineDiagram(engine) {
     Object.entries(SENSOR_META).forEach(([key, meta]) => {
-      const g = el('part-' + key);
-      if (!g) return;
+      const nodes = document.querySelectorAll('[data-part="' + key + '"]');
       const status = engine.statuses[key];
-      g.classList.remove('status-nominal', 'status-warning', 'status-critical');
-      g.classList.add('status-' + status);
-      const titleEl = g.querySelector('title');
-      if (titleEl) {
-        titleEl.textContent = `${meta.label}: ${engine.readings[key]} ${meta.unit} — ${status.toUpperCase()}`;
-      }
+      nodes.forEach((g) => {
+        g.classList.remove('status-nominal', 'status-warning', 'status-critical');
+        g.classList.add('status-' + status);
+        const titleEl = g.querySelector('title');
+        if (titleEl) {
+          titleEl.textContent = `${meta.label}: ${engine.readings[key]} ${meta.unit} — ${status.toUpperCase()}`;
+        }
+      });
     });
   }
 
@@ -198,12 +177,6 @@
     renderAiAnalysis(engine);
     renderPredictedFault(engine);
     renderEngineDiagram(engine);
-    renderSensorGrid(engine);
-
-    el('fAlt').textContent = engine.altitude + ' m';
-    el('fSpd').textContent = engine.airspeed + ' km/h';
-    el('fHrs').textContent = engine.hoursFlown.toFixed(1) + ' h';
-    el('fRul').textContent = engine.rul + ' h';
   }
 
   function renderAlerts(payload) {
@@ -237,7 +210,7 @@
           x: { display: false },
           y: {
             position: 'left',
-            grid: { color: 'rgba(61, 220, 132, 0.08)' },
+            grid: { color: 'rgba(255, 255, 255, 0.06)' },
             ticks: { color: datasets[0].borderColor, font: { size: 10, family: "'JetBrains Mono', monospace" } },
           },
           y1: {
@@ -248,7 +221,7 @@
         },
         plugins: {
           legend: {
-            labels: { color: '#7fa08b', boxWidth: 10, font: { size: 11, family: "'JetBrains Mono', monospace" } },
+            labels: { color: '#93949c', boxWidth: 10, font: { size: 11, family: "'JetBrains Mono', monospace" } },
           },
         },
         elements: { point: { radius: 0 }, line: { tension: 0.35, borderWidth: 2 } },
@@ -264,7 +237,7 @@
     ]);
     state.charts.oilVib = makeChart(el('chartOilVib').getContext('2d'), [
       { label: 'Oil Pressure (psi)', data: [], borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.08)', fill: true, yAxisID: 'y' },
-      { label: 'Vibration (mm/s)', data: [], borderColor: '#3ddc84', backgroundColor: 'rgba(61,220,132,0.08)', fill: true, yAxisID: 'y1' },
+      { label: 'Vibration (mm/s)', data: [], borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,0.08)', fill: true, yAxisID: 'y1' },
     ]);
   }
 

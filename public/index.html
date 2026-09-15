@@ -92,163 +92,248 @@
 
         <div class="engine-diagram-wrap">
           <div class="engine-diagram-head">
-            <h3>Rotax&#8209;912 iS // Live Component Map</h3>
+            <h3>Aero Piston Engine // Live Component Map</h3>
             <div class="engine-legend">
               <span><i class="dot nominal"></i>Nominal</span>
               <span><i class="dot warning"></i>Warning</span>
               <span><i class="dot critical"></i>Critical</span>
             </div>
           </div>
-          <svg class="engine-svg" viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Aero piston engine diagram with live status glow per component">
-            <defs>
-              <linearGradient id="gradMetal" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stop-color="#e2e7ee"/>
-                <stop offset="0.5" stop-color="#b7c0cf"/>
-                <stop offset="1" stop-color="#8b95a5"/>
-              </linearGradient>
-              <linearGradient id="gradMetalDark" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stop-color="#9aa5b4"/>
-                <stop offset="1" stop-color="#5b6577"/>
-              </linearGradient>
-              <linearGradient id="gradDark" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stop-color="#3a4354"/>
-                <stop offset="1" stop-color="#1c2330"/>
-              </linearGradient>
-              <linearGradient id="gradRubber" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stop-color="#3a3f47"/>
-                <stop offset="1" stop-color="#14171c"/>
-              </linearGradient>
-              <pattern id="finPatternH" width="9" height="9" patternUnits="userSpaceOnUse">
-                <line x1="0" y1="0" x2="9" y2="0" stroke="#5b6577" stroke-width="2.4"/>
-              </pattern>
-              <pattern id="finPatternV" width="9" height="9" patternUnits="userSpaceOnUse">
-                <line x1="0" y1="0" x2="0" y2="9" stroke="#5b6577" stroke-width="2.4"/>
-              </pattern>
-              <filter id="glowNominal" x="-80%" y="-80%" width="260%" height="260%">
-                <feDropShadow dx="0" dy="0" stdDeviation="3.2" flood-color="#22c55e" flood-opacity="0.85"/>
-              </filter>
-              <filter id="glowWarning" x="-80%" y="-80%" width="260%" height="260%">
-                <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ff9d1f" flood-opacity="0.95"/>
-              </filter>
-              <filter id="glowCritical" x="-100%" y="-100%" width="300%" height="300%">
-                <feDropShadow dx="0" dy="0" stdDeviation="7" flood-color="#ff3b30" flood-opacity="1"/>
-              </filter>
-            </defs>
 
-            <ellipse cx="380" cy="400" rx="330" ry="14" fill="#0b2545" opacity="0.08"/>
+          <div class="engine-photo-stage">
+            <img class="engine-photo" src="img/engine-photo.png" alt="Air-cooled aero piston engine with propeller — the live component map for telemetry glow overlays" />
+            <svg class="engine-marks" viewBox="0 0 516 387" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Live status glow markers over engine components">
+              <defs>
+                <filter id="glowNominal" x="-200%" y="-200%" width="500%" height="500%">
+                  <feDropShadow dx="0" dy="0" stdDeviation="3.2" flood-color="#22c55e" flood-opacity="0.9"/>
+                </filter>
+                <filter id="glowWarning" x="-200%" y="-200%" width="500%" height="500%">
+                  <feDropShadow dx="0" dy="0" stdDeviation="4.5" flood-color="#ff9d1f" flood-opacity="0.95"/>
+                </filter>
+                <filter id="glowCritical" x="-260%" y="-260%" width="620%" height="620%">
+                  <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#ff3b30" flood-opacity="1"/>
+                </filter>
+              </defs>
 
-            <!-- Crankcase / vibration -->
-            <g id="part-vibration" class="engine-part">
-              <title>Vibration: -- mm/s</title>
-              <rect class="pshape" x="190" y="182" width="380" height="56" rx="16" fill="url(#gradMetal)"/>
-              <rect x="190" y="182" width="380" height="56" rx="16" fill="url(#finPatternH)" opacity="0.25"/>
-              <circle cx="230" cy="210" r="4" fill="#5b6577"/>
-              <circle cx="290" cy="210" r="4" fill="#5b6577"/>
-              <circle cx="380" cy="210" r="4" fill="#5b6577"/>
-              <circle cx="470" cy="210" r="4" fill="#5b6577"/>
-              <circle cx="530" cy="210" r="4" fill="#5b6577"/>
-            </g>
-
-            <!-- Gearbox + prop flange / RPM -->
-            <g id="part-rpm" class="engine-part">
-              <title>Engine Speed: -- RPM</title>
-              <rect class="pshape" x="118" y="164" width="88" height="92" rx="16" fill="url(#gradMetal)"/>
-              <g class="prop-spin">
-                <ellipse cx="98" cy="210" rx="46" ry="7" fill="#3a4354" opacity="0.55" transform="rotate(35 98 210)"/>
-                <ellipse cx="98" cy="210" rx="46" ry="7" fill="#3a4354" opacity="0.55" transform="rotate(-35 98 210)"/>
+              <!-- 1 Cylinder heads -->
+              <g id="part-cht" class="engine-part" data-part="cht">
+                <title>Cylinder Head Temp: -- &#176;C</title>
+                <circle class="mark-ring" cx="150" cy="168" r="20"/>
+                <circle class="mark-dot" cx="150" cy="168" r="7"/>
+                <text class="mark-num" x="150" y="172">1</text>
               </g>
-              <circle class="pshape" cx="98" cy="210" r="40" fill="url(#gradMetalDark)"/>
-              <circle cx="98" cy="210" r="27" fill="none" stroke="#3a4354" stroke-width="1"/>
-              <circle cx="98" cy="188" r="3" fill="#3a4354"/>
-              <circle cx="118" cy="222" r="3" fill="#3a4354"/>
-              <circle cx="78" cy="222" r="3" fill="#3a4354"/>
-              <circle class="pshape" cx="98" cy="210" r="13" fill="url(#gradDark)"/>
-            </g>
 
-            <!-- Accessory case: alternator + battery -->
-            <g id="part-batteryVoltage" class="engine-part">
-              <title>Battery Voltage: -- V</title>
-              <rect class="pshape" x="572" y="176" width="104" height="68" rx="14" fill="url(#gradMetal)"/>
-              <circle class="pshape" cx="605" cy="168" r="19" fill="url(#gradMetalDark)"/>
-              <circle cx="605" cy="168" r="13" fill="none" stroke="#5b6577" stroke-width="1"/>
-              <circle cx="605" cy="168" r="7" fill="none" stroke="#5b6577" stroke-width="1"/>
-              <rect class="pshape" x="686" y="196" width="42" height="52" rx="5" fill="url(#gradDark)"/>
-              <circle cx="696" cy="206" r="2.6" fill="#c8cfdb"/>
-              <circle cx="710" cy="206" r="2.6" fill="#c8cfdb"/>
-              <text x="691" y="230" font-size="11" fill="#c8cfdb" font-weight="700">+</text>
-              <text x="706" y="230" font-size="11" fill="#c8cfdb" font-weight="700">-</text>
-            </g>
+              <!-- 2 Exhaust headers -->
+              <g id="part-egt" class="engine-part" data-part="egt">
+                <title>Exhaust Gas Temp: -- &#176;C</title>
+                <circle class="mark-ring" cx="95" cy="292" r="20"/>
+                <circle class="mark-dot" cx="95" cy="292" r="7"/>
+                <text class="mark-num" x="95" y="296">2</text>
+              </g>
 
-            <!-- 4 cylinders (boxer pairs) / CHT -->
-            <g id="part-cht" class="engine-part">
-              <title>Cylinder Head Temp: -- &#176;C</title>
-              <rect class="pshape" x="269" y="94" width="46" height="88" rx="8" fill="url(#gradMetal)"/>
-              <rect x="269" y="94" width="46" height="88" rx="8" fill="url(#finPatternH)" opacity="0.3"/>
-              <rect class="pshape" x="259" y="76" width="66" height="24" rx="7" fill="url(#gradMetalDark)"/>
-              <rect class="pshape" x="269" y="238" width="46" height="88" rx="8" fill="url(#gradMetal)"/>
-              <rect x="269" y="238" width="46" height="88" rx="8" fill="url(#finPatternH)" opacity="0.3"/>
-              <rect class="pshape" x="259" y="320" width="66" height="24" rx="7" fill="url(#gradMetalDark)"/>
-              <rect class="pshape" x="435" y="94" width="46" height="88" rx="8" fill="url(#gradMetal)"/>
-              <rect x="435" y="94" width="46" height="88" rx="8" fill="url(#finPatternH)" opacity="0.3"/>
-              <rect class="pshape" x="425" y="76" width="66" height="24" rx="7" fill="url(#gradMetalDark)"/>
-              <rect class="pshape" x="435" y="238" width="46" height="88" rx="8" fill="url(#gradMetal)"/>
-              <rect x="435" y="238" width="46" height="88" rx="8" fill="url(#finPatternH)" opacity="0.3"/>
-              <rect class="pshape" x="425" y="320" width="66" height="24" rx="7" fill="url(#gradMetalDark)"/>
-              <circle cx="252" cy="86" r="6" fill="#c17f4a"/>
-              <circle cx="252" cy="330" r="6" fill="#c17f4a"/>
-              <circle cx="418" cy="86" r="6" fill="#c17f4a"/>
-              <circle cx="418" cy="330" r="6" fill="#c17f4a"/>
-            </g>
+              <!-- 3 Oil sump / pump -->
+              <g id="part-oilPressure" class="engine-part" data-part="oilPressure">
+                <title>Oil Pressure: -- psi</title>
+                <circle class="mark-ring" cx="238" cy="288" r="20"/>
+                <circle class="mark-dot" cx="238" cy="288" r="7"/>
+                <text class="mark-num" x="238" y="292">3</text>
+              </g>
 
-            <!-- Exhaust headers / EGT -->
-            <g id="part-egt" class="engine-part">
-              <title>Exhaust Gas Temp: -- &#176;C</title>
-              <path class="pshape" d="M292 182 Q 258 245 244 300" fill="none" stroke="url(#gradRubber)" stroke-width="9" stroke-linecap="round"/>
-              <path class="pshape" d="M292 238 Q 258 275 244 300" fill="none" stroke="url(#gradRubber)" stroke-width="9" stroke-linecap="round"/>
-              <path class="pshape" d="M458 182 Q 424 250 414 300" fill="none" stroke="url(#gradRubber)" stroke-width="9" stroke-linecap="round"/>
-              <path class="pshape" d="M458 238 Q 424 275 414 300" fill="none" stroke="url(#gradRubber)" stroke-width="9" stroke-linecap="round"/>
-              <path class="pshape" d="M414 300 L244 300 Q160 300 138 340 Q118 370 72 382" fill="none" stroke="url(#gradRubber)" stroke-width="11" stroke-linecap="round"/>
-              <circle class="pshape" cx="68" cy="384" r="9" fill="url(#gradDark)"/>
-            </g>
+              <!-- 4 Oil cooler -->
+              <g id="part-oilTemp" class="engine-part" data-part="oilTemp">
+                <title>Oil Temperature: -- &#176;C</title>
+                <circle class="mark-ring" cx="74" cy="234" r="20"/>
+                <circle class="mark-dot" cx="74" cy="234" r="7"/>
+                <text class="mark-num" x="74" y="238">4</text>
+              </g>
 
-            <!-- Oil sump / oil pressure -->
-            <g id="part-oilPressure" class="engine-part">
-              <title>Oil Pressure: -- psi</title>
-              <path class="pshape" d="M300 238 L460 238 L442 272 L318 272 Z" fill="url(#gradMetalDark)"/>
-              <circle cx="380" cy="266" r="4" fill="#3a4354"/>
-            </g>
+              <!-- 5 Carburetors / fuel line -->
+              <g id="part-fuelFlow" class="engine-part" data-part="fuelFlow">
+                <title>Fuel Flow: -- L/h</title>
+                <circle class="mark-ring" cx="196" cy="95" r="20"/>
+                <circle class="mark-dot" cx="196" cy="95" r="7"/>
+                <text class="mark-num" x="196" y="99">5</text>
+              </g>
 
-            <!-- Oil cooler / oil temp -->
-            <g id="part-oilTemp" class="engine-part">
-              <title>Oil Temperature: -- &#176;C</title>
-              <path class="pshape" d="M330 272 Q 210 306 150 328" fill="none" stroke="url(#gradRubber)" stroke-width="6" stroke-linecap="round"/>
-              <rect class="pshape" x="116" y="330" width="58" height="38" rx="4" fill="url(#gradMetal)"/>
-              <rect x="116" y="330" width="58" height="38" rx="4" fill="url(#finPatternV)" opacity="0.35"/>
-            </g>
+              <!-- 6 Intake manifold -->
+              <g id="part-manifoldPressure" class="engine-part" data-part="manifoldPressure">
+                <title>Manifold Pressure: -- kPa</title>
+                <circle class="mark-ring" cx="157" cy="118" r="20"/>
+                <circle class="mark-dot" cx="157" cy="118" r="7"/>
+                <text class="mark-num" x="157" y="122">6</text>
+              </g>
 
-            <!-- Carbs + fuel tank / fuel flow -->
-            <g id="part-fuelFlow" class="engine-part">
-              <title>Fuel Flow: -- L/h</title>
-              <rect class="pshape" x="345" y="40" width="56" height="26" rx="5" fill="url(#gradMetal)"/>
-              <path d="M373 66 L370 100 Q368 128 366 144" fill="none" stroke="#c17f4a" stroke-width="3.5" stroke-linecap="round"/>
-              <rect class="pshape" x="349" y="150" width="34" height="32" rx="6" fill="url(#gradMetalDark)"/>
-              <circle class="pshape" cx="350" cy="160" r="15" fill="url(#gradMetal)"/>
-              <circle class="pshape" cx="382" cy="160" r="15" fill="url(#gradMetal)"/>
-            </g>
+              <!-- 7 Crankcase -->
+              <g id="part-vibration" class="engine-part" data-part="vibration">
+                <title>Vibration: -- mm/s</title>
+                <circle class="mark-ring" cx="250" cy="176" r="20"/>
+                <circle class="mark-dot" cx="250" cy="176" r="7"/>
+                <text class="mark-num" x="250" y="180">7</text>
+              </g>
 
-            <!-- Intake manifold / manifold pressure -->
-            <g id="part-manifoldPressure" class="engine-part">
-              <title>Manifold Pressure: -- kPa</title>
-              <path class="pshape" d="M330 82 L330 344" fill="none" stroke="#c8cfdb" stroke-width="7" stroke-linecap="round"/>
-              <path class="pshape" d="M496 82 L496 344" fill="none" stroke="#c8cfdb" stroke-width="7" stroke-linecap="round"/>
-              <path class="pshape" d="M366 175 L366 210 L330 210" fill="none" stroke="#c8cfdb" stroke-width="6" stroke-linecap="round"/>
-              <path class="pshape" d="M366 175 L366 210 L496 210" fill="none" stroke="#c8cfdb" stroke-width="6" stroke-linecap="round"/>
-            </g>
-          </svg>
-          <p class="engine-diagram-caption">HOVER ANY COMPONENT FOR ITS LIVE READING — GLOW COLOUR MIRRORS SENSOR STATUS BELOW</p>
+              <!-- 8 Prop gearbox / flange -->
+              <g id="part-rpm" class="engine-part" data-part="rpm">
+                <title>Engine Speed: -- RPM</title>
+                <circle class="mark-ring" cx="301" cy="157" r="20"/>
+                <circle class="mark-dot" cx="301" cy="157" r="7"/>
+                <text class="mark-num" x="301" y="161">8</text>
+              </g>
+
+              <!-- 9 Alternator / battery bus -->
+              <g id="part-batteryVoltage" class="engine-part" data-part="batteryVoltage">
+                <title>Battery Voltage: -- V</title>
+                <circle class="mark-ring" cx="250" cy="87" r="20"/>
+                <circle class="mark-dot" cx="250" cy="87" r="7"/>
+                <text class="mark-num" x="250" y="91">9</text>
+              </g>
+            </svg>
+          </div>
+
+          <p class="engine-recreation-label">Recreated Component Outline — Vector Twin, Same Live Telemetry</p>
+          <div class="engine-recreation-stage">
+            <svg class="engine-recreation" viewBox="0 0 516 387" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Full outline recreation of the aero piston engine, built from individually glowing component shapes">
+
+              <!-- Propeller blades (static, non-instrumented) -->
+              <g class="recon-static-group">
+                <path class="recon-static no-fill" d="M352,188 C356,155 366,115 380,78 C388,58 397,42 406,30 L419,26 C413,42 402,78 392,112 C383,145 372,172 362,196 Z"/>
+                <path class="recon-static no-fill" d="M336,202 C325,232 309,270 296,302 C288,322 285,342 290,359 C299,366 314,362 323,347 C338,321 350,291 357,262 C362,242 359,218 351,204 Z"/>
+              </g>
+
+              <!-- Spinner cone (static, non-instrumented) -->
+              <g class="recon-static-group">
+                <path class="recon-static" d="M344,134 C378,118 418,128 448,153 C461,162 469,171 469,177 C469,183 461,192 448,200 C418,225 378,235 344,219 C337,209 334,189 334,177 C334,164 337,144 344,134 Z"/>
+                <path class="recon-fin" d="M352,145 C380,138 415,145 440,163"/>
+                <path class="recon-fin" d="M352,210 C380,217 415,210 440,193"/>
+              </g>
+
+              <!-- 8 Prop hub / flange -->
+              <g id="part-rpm-recon" class="recon-part" data-part="rpm">
+                <title>Engine Speed: -- RPM</title>
+                <circle class="recon-shape" cx="339" cy="177" r="40"/>
+                <circle class="recon-shape" cx="339" cy="177" r="11"/>
+                <circle class="recon-shape" cx="379" cy="177" r="3"/>
+                <circle class="recon-shape" cx="359" cy="142.4" r="3"/>
+                <circle class="recon-shape" cx="319" cy="142.4" r="3"/>
+                <circle class="recon-shape" cx="299" cy="177" r="3"/>
+                <circle class="recon-shape" cx="319" cy="211.6" r="3"/>
+                <circle class="recon-shape" cx="359" cy="211.6" r="3"/>
+              </g>
+
+              <!-- 7 Crankcase -->
+              <g id="part-vibration-recon" class="recon-part" data-part="vibration">
+                <title>Vibration: -- mm/s</title>
+                <path class="recon-shape" d="M196,150 C206,118 248,101 292,105 C318,108 334,124 339,146 L339,210 C334,231 313,247 286,250 C249,254 212,241 197,214 C188,194 188,169 196,150 Z"/>
+                <path class="recon-fin" d="M205,130 C240,118 280,118 320,132"/>
+                <path class="recon-fin" d="M200,175 C240,168 290,168 335,178"/>
+                <path class="recon-fin" d="M205,205 C240,218 285,222 330,208"/>
+              </g>
+
+              <!-- Ignition harness (static, non-instrumented) -->
+              <g class="recon-static-group">
+                <path class="recon-wire" d="M25,95 C70,65 120,60 160,75 C185,84 200,70 215,60"/>
+                <path class="recon-wire" d="M20,108 C65,130 130,128 175,105 C195,95 205,80 218,72"/>
+                <path class="recon-wire" d="M40,118 C90,138 150,140 195,118"/>
+              </g>
+
+              <!-- 5 Fuel servo / carburetor -->
+              <g id="part-fuelFlow-recon" class="recon-part" data-part="fuelFlow">
+                <title>Fuel Flow: -- L/h</title>
+                <rect class="recon-shape" x="182" y="68" width="58" height="36" rx="6"/>
+                <rect class="recon-shape" x="190" y="57" width="9" height="13" rx="2"/>
+                <rect class="recon-shape" x="211" y="57" width="9" height="13" rx="2"/>
+              </g>
+
+              <!-- 9 Alternator / battery bus -->
+              <g id="part-batteryVoltage-recon" class="recon-part" data-part="batteryVoltage">
+                <title>Battery Voltage: -- V</title>
+                <rect class="recon-shape" x="245" y="58" width="42" height="34" rx="6"/>
+                <circle class="recon-shape" cx="266" cy="95" r="9"/>
+              </g>
+
+              <!-- 6 Intake manifold -->
+              <g id="part-manifoldPressure-recon" class="recon-part" data-part="manifoldPressure">
+                <title>Manifold Pressure: -- kPa</title>
+                <path class="recon-shape no-fill" d="M185,104 C140,108 100,112 80,118"/>
+                <path class="recon-shape no-fill" d="M195,104 C170,115 140,122 122,130"/>
+                <path class="recon-shape no-fill" d="M215,104 C195,130 185,165 176,178"/>
+              </g>
+
+              <!-- 1 Cylinder heads -->
+              <g id="part-cht-recon" class="recon-part" data-part="cht">
+                <title>Cylinder Head Temp: -- &#176;C</title>
+                <g transform="translate(78,132) rotate(-18)">
+                  <rect class="recon-shape" x="-29" y="-44" width="58" height="88" rx="10"/>
+                  <ellipse class="recon-shape" cx="0" cy="-58" rx="23" ry="13"/>
+                  <path class="recon-fin" d="M-25,-30 L25,-30"/>
+                  <path class="recon-fin" d="M-25,-14 L25,-14"/>
+                  <path class="recon-fin" d="M-25,2 L25,2"/>
+                  <path class="recon-fin" d="M-25,18 L25,18"/>
+                  <circle class="recon-boot" cx="8" cy="30" r="9"/>
+                </g>
+                <g transform="translate(122,168) rotate(-14)">
+                  <rect class="recon-shape" x="-35" y="-52" width="70" height="104" rx="12"/>
+                  <ellipse class="recon-shape" cx="0" cy="-67" rx="28" ry="15"/>
+                  <path class="recon-fin" d="M-30,-34 L30,-34"/>
+                  <path class="recon-fin" d="M-30,-15 L30,-15"/>
+                  <path class="recon-fin" d="M-30,4 L30,4"/>
+                  <path class="recon-fin" d="M-30,23 L30,23"/>
+                  <circle class="recon-boot" cx="10" cy="36" r="11"/>
+                </g>
+                <g transform="translate(176,210) rotate(-10)">
+                  <rect class="recon-shape" x="-42" y="-62" width="84" height="124" rx="14"/>
+                  <ellipse class="recon-shape" cx="0" cy="-79" rx="33" ry="17"/>
+                  <path class="recon-fin" d="M-36,-40 L36,-40"/>
+                  <path class="recon-fin" d="M-36,-17 L36,-17"/>
+                  <path class="recon-fin" d="M-36,6 L36,6"/>
+                  <path class="recon-fin" d="M-36,29 L36,29"/>
+                  <circle class="recon-boot" cx="12" cy="43" r="13"/>
+                </g>
+              </g>
+
+              <!-- 4 Oil cooler -->
+              <g id="part-oilTemp-recon" class="recon-part" data-part="oilTemp">
+                <title>Oil Temperature: -- &#176;C</title>
+                <rect class="recon-shape" x="32" y="196" width="52" height="62" rx="6"/>
+                <path class="recon-fin" d="M42,202 L42,252"/>
+                <path class="recon-fin" d="M52,202 L52,252"/>
+                <path class="recon-fin" d="M62,202 L62,252"/>
+                <path class="recon-fin" d="M72,202 L72,252"/>
+              </g>
+
+              <!-- 2 Exhaust headers -->
+              <g id="part-egt-recon" class="recon-part" data-part="egt">
+                <title>Exhaust Gas Temp: -- &#176;C</title>
+                <path class="recon-shape no-fill" d="M90,176 C70,210 55,240 50,270 C47,290 48,310 55,328"/>
+                <path class="recon-shape no-fill" d="M132,214 C105,245 85,270 72,295 C65,312 60,322 55,330"/>
+                <path class="recon-shape no-fill" d="M182,252 C150,275 115,295 90,312 C75,322 63,328 55,330"/>
+                <rect class="recon-shape" x="23" y="320" width="34" height="20" rx="8"/>
+                <path class="recon-shape no-fill" d="M23,330 L5,330"/>
+              </g>
+
+              <!-- 3 Oil sump / pump -->
+              <g id="part-oilPressure-recon" class="recon-part" data-part="oilPressure">
+                <title>Oil Pressure: -- psi</title>
+                <path class="recon-shape" d="M205,268 C205,258 213,252 225,252 L255,252 C267,252 275,258 275,268 L275,300 C275,312 265,320 250,320 C235,320 222,314 212,304 C206,297 205,285 205,268 Z"/>
+                <path class="recon-wire" d="M245,252 C248,240 255,230 262,222"/>
+              </g>
+            </svg>
+          </div>
+          <p class="engine-diagram-caption">SAME 9 LIVE SENSORS, DRAWN AS AN OUTLINE TWIN — EACH SHAPE GLOWS WITH ITS OWN COMPONENT STATUS</p>
+
+          <div class="engine-key-list" id="engineKeyList">
+            <div class="key-item"><span class="key-num">1</span><span class="key-name">Cylinder Heads</span></div>
+            <div class="key-item"><span class="key-num">2</span><span class="key-name">Exhaust Headers</span></div>
+            <div class="key-item"><span class="key-num">3</span><span class="key-name">Oil Sump / Pump</span></div>
+            <div class="key-item"><span class="key-num">4</span><span class="key-name">Oil Cooler</span></div>
+            <div class="key-item"><span class="key-num">5</span><span class="key-name">Carburetors / Fuel Line</span></div>
+            <div class="key-item"><span class="key-num">6</span><span class="key-name">Intake Manifold</span></div>
+            <div class="key-item"><span class="key-num">7</span><span class="key-name">Crankcase</span></div>
+            <div class="key-item"><span class="key-num">8</span><span class="key-name">Prop Gearbox / Flange</span></div>
+            <div class="key-item"><span class="key-num">9</span><span class="key-name">Alternator / Battery Bus</span></div>
+          </div>
+
+          <p class="engine-diagram-caption">HOVER ANY NUMBERED MARKER FOR ITS LIVE READING — GLOW COLOUR MIRRORS SENSOR STATUS BELOW</p>
         </div>
-
-        <div class="sensor-grid" id="sensorGrid"></div>
 
         <div class="chart-row">
           <div class="chart-box">
@@ -261,12 +346,6 @@
           </div>
         </div>
 
-        <div class="flight-strip">
-          <div><span>Altitude</span><strong id="fAlt">-- m</strong></div>
-          <div><span>Airspeed</span><strong id="fSpd">-- km/h</strong></div>
-          <div><span>Engine Hours</span><strong id="fHrs">--</strong></div>
-          <div><span>Est. Remaining Useful Life</span><strong id="fRul">-- h</strong></div>
-        </div>
       </section>
 
       <!-- Alerts feed -->

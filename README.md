@@ -57,6 +57,54 @@ Then open **http://localhost:5000**.
 - Force a fresh AI analysis now: `POST /api/ai-analysis/:engineId/refresh`
 - Live stream: Socket.IO `ai-analysis` event, emitted whenever a fresh analysis completes
 
+Every engine object in `/api/snapshot` also carries an `analytics` field —
+a second, independent health/anomaly/RUL model (see **Advanced analytics**
+below) computed alongside the original rolling z-score model.
+
+### Physics-based mission simulation & replay (`engine_sim/`, `twin_core/`, `replay/`)
+
+Separate from the always-on 3-UAV live feed above, `engine_sim/` implements
+a proper mean-value physics model (Wiebe-style combustion heat release,
+thermal lag, ISA altitude derating) that can run a full mission profile
+on demand, persist every tick, and be replayed back later:
+
+- List available mission profiles: `GET /api/engine-sim/profiles`
+  (`climbCruiseDescent`, `highAltitudeLongEndurance`, `hotWeather`,
+  `rapidThrottleTransients`)
+- Run a mission end-to-end (persists to `twin_core/data/`, returns a
+  summary): `POST /api/engine-sim/run`
+  `{ "engineId": "uav-01", "profileId": "hotWeather", "durationSeconds": 3600, "faultTypes": ["overheat"] }`
+  (`faultTypes` is optional — omit it to get a randomized 0-2 concurrent
+  faults per run)
+- List recorded missions for an engine: `GET /api/engine-sim/recordings/:engineId`
+- Read a recorded mission's full time series: `GET /api/engine-sim/recordings/:engineId/:missionId`
+- Replay a recorded mission at variable speed, streamed as `replay-frame`
+  Socket.IO events: `POST /api/engine-sim/replay/:engineId/:missionId`
+  `{ "speed": 10 }`
+- Control an in-progress replay: `POST /api/engine-sim/replay/:engineId/control`
+  `{ "action": "pause" | "resume" | "seek" | "speed" | "stop", "value": ... }`
+
+The dashboard does not yet have UI for these — they're API/Socket.IO-only
+for now (see `docs/ROADMAP.md`).
+
+### Advanced analytics (`analytics/`)
+
+Layered on top of (not replacing) the original rolling z-score + threshold
+model, every engine's live tick also runs through `analytics/`:
+
+- a rate-of-change-aware health index that flags a sensor trending toward a
+  warning/critical band *before* it crosses the static threshold, mapped
+  onto the 8-category fault taxonomy from `docs/FAULT_TAXONOMY.md`
+- a multivariate anomaly detector (Mahalanobis distance against a
+  running mean/covariance fitted on the engine's own healthy telemetry)
+  that catches a combination of individually-normal readings that is
+  jointly implausible
+- an RUL estimate with a confidence band, and an offline (no network call,
+  runs every tick) explainability narrative — a free complement to the
+  Gemini-based situation report above
+
+See `docs/MODEL_CARDS.md` for what each model is/isn't validated against.
+
 ## AI Engine Situation Analysis (RAG + Gemini)
 
 Every engine gets a running plain-language "situation report" — e.g. *"RQ-M2
@@ -115,14 +163,36 @@ https://ai.google.dev/gemini-api/docs/rate-limits.
 
 ```
 SIH/
-├── server.js            # Express + Socket.IO backend, REST API, tick loop
-├── simulator.js         # Spoofed telemetry generator, fault injection, health/RUL model
+├── server.js             # Express + Socket.IO backend, REST API, tick loop
+├── simulator.js          # Spoofed telemetry generator, fault injection, health/RUL model + analytics/ integration
+├── engine_sim/           # Mean-value physics engine model, mission profiles, fault-injection curves
+│   ├── physics.js
+│   ├── environment.js    # ISA altitude/atmosphere model
+│   ├── missions.js       # Mission profile library
+│   ├── faults.js         # Parametrized fault degradation curves
+│   └── index.js          # PhysicsEngine
+├── analytics/            # Rate-aware health index, multivariate anomaly detection, RUL, explainability
+│   ├── healthIndex.js
+│   ├── anomalyDetection.js
+│   ├── rulModel.js
+│   ├── explain.js
+│   ├── maintenanceRecommendation.js
+│   └── index.js
+├── twin_core/            # Persisted mission history (JSON-Lines) + live-state cache
+│   ├── store.js
+│   ├── stateStore.js
+│   └── index.js
+├── replay/               # Runs engine_sim missions end-to-end; replays them back at variable speed
+│   ├── missionRunner.js
+│   ├── replayEngine.js
+│   └── index.js
 ├── ai/
 │   ├── knowledgeBase.js  # RAG corpus: fault/sensor/health domain knowledge
 │   ├── retriever.js      # RAG retrieval: picks relevant docs per engine snapshot
 │   ├── geminiClient.js   # Gemini generateContent REST wrapper
 │   └── analysisEngine.js # Orchestration: prompts, caching, throttling, fallback
-├── .env.example         # GEMINI_API_KEY and related config (copy to .env)
+├── docs/                 # Architecture, fault taxonomy, model cards, deployment roadmap
+├── .env.example          # GEMINI_API_KEY and related config (copy to .env)
 ├── package.json
 └── public/
     ├── index.html
