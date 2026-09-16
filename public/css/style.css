@@ -33,7 +33,7 @@
   --shadow: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 10px 28px rgba(0, 0, 0, 0.55);
   --shadow-lg: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 16px 40px rgba(0, 0, 0, 0.65);
   --radius: 3px;
-  --mono: 'JetBrains Mono', 'Consolas', 'SFMono-Regular', ui-monospace, monospace;
+  --mono: 'Inter', 'Consolas', 'SFMono-Regular', ui-monospace, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -423,6 +423,9 @@ html, body {
 .recon-fin { fill: none; stroke: var(--border-bright); stroke-width: 1; opacity: 0.85; vector-effect: non-scaling-stroke; }
 .recon-wire { fill: none; stroke: #7a352a; stroke-width: 1.6; opacity: 0.8; vector-effect: non-scaling-stroke; }
 .recon-boot { fill: rgba(0,0,0,0.55); stroke: var(--border-bright); stroke-width: 1; }
+
+.recon-part .recon-pipe { stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
+.recon-pipe-highlight { fill: none; stroke: rgba(255,255,255,0.32); stroke-width: 1.6; stroke-linecap: round; opacity: 0.9; vector-effect: non-scaling-stroke; pointer-events: none; }
 
 .recon-part { cursor: default; }
 .recon-part .recon-shape {

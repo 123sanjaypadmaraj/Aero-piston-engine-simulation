@@ -84,7 +84,7 @@ ${JSON.stringify(telemetry, null, 2)}
 
 Fleet context: mission reliability ${fleetSnapshot.fleet.missionReliability}%, ${fleetSnapshot.fleet.criticalCount} of ${fleetSnapshot.fleet.engineCount} fleet engine(s) currently critical.
 
-Write a short analysis (max ~120 words, 3-5 sentences, plain prose, no markdown headers or bullet lists) that:
+Write a short analysis (max ~60 words, 2-3 sentences, plain prose, no markdown headers or bullet lists) that:
 1. States the engine's overall condition in one clear sentence (nominal / degraded / critical).
 2. Names the specific sensor(s) or fault driving that condition, with the actual reading, and briefly why it matters (use the knowledge above).
 3. Gives one concrete, actionable recommendation for the flight/maintenance crew.
