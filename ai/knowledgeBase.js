@@ -4,7 +4,7 @@
  * Small, hand-curated domain knowledge base for the aero piston engine
  * digital twin. This is the "corpus" side of the retrieval-augmented
  * generation (RAG) pipeline in ./retriever.js + ./analysisEngine.js:
- * instead of sending Gemini raw numbers, we retrieve the handful of
+ * instead of sending the LLM raw numbers, we retrieve the handful of
  * documents relevant to the engine's *current* condition (active fault,
  * predicted fault, out-of-band sensors) and ground the model's narrative
  * in that text, so explanations stay accurate and use consistent
@@ -19,7 +19,7 @@
 
 'use strict';
 
-const KNOWLEDGE_BASE = [
+const KNOWLEDGE_BASE = Object.freeze([
   {
     id: 'fault-overheat',
     tags: ['overheat', 'cht', 'egt', 'oilTemp'],
@@ -63,6 +63,12 @@ const KNOWLEDGE_BASE = [
     text: 'CHT and EGT only have an upper danger side. They normally track together; if EGT rises much faster than CHT it points more toward a lean mixture or ignition timing issue than a cooling-airflow problem, and vice versa.',
   },
   {
+    id: 'sensor-oilTemp',
+    tags: ['oilTemp', 'general'],
+    title: 'Oil Temperature',
+    text: 'Oil temperature only has an upper danger side. A slow climb usually tracks CHT and points to a cooling or power-setting issue; a climb that arrives together with falling oil pressure points to a lubrication problem and is more urgent than either reading alone.',
+  },
+  {
     id: 'sensor-vibration',
     tags: ['vibration', 'general'],
     title: 'Vibration',
@@ -104,6 +110,6 @@ const KNOWLEDGE_BASE = [
     title: 'Mission Reliability',
     text: 'Fleet-wide mission reliability combines the average health across all engines with a penalty for any engine currently in a critical state, giving a single number for go/no-go style situational awareness across the fleet.',
   },
-];
+]);
 
 module.exports = { KNOWLEDGE_BASE };

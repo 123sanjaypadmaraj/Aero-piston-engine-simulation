@@ -6,47 +6,70 @@
 
 'use strict';
 
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+// NaN clamps to `lo` (fail-safe: e.g. a NaN health score becomes 0, not NaN).
+function clamp(v, lo, hi) {
+  if (Number.isNaN(v)) return lo;
+  return Math.max(lo, Math.min(hi, v));
+}
+
+// Statistics below ignore non-finite entries (NaN/Infinity/non-numbers) and
+// tolerate null/empty input, rather than propagating NaN into every caller.
+function finiteOnly(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.every((v) => typeof v === 'number' && Number.isFinite(v))
+    ? arr
+    : arr.filter((v) => typeof v === 'number' && Number.isFinite(v));
+}
 
 function mean(arr) {
-  if (!arr.length) return 0;
-  return arr.reduce((a, b) => a + b, 0) / arr.length;
+  const a = finiteOnly(arr);
+  if (!a.length) return 0;
+  return a.reduce((x, y) => x + y, 0) / a.length;
 }
 
-function variance(arr, m = mean(arr)) {
-  if (arr.length < 2) return 0;
-  return arr.reduce((a, b) => a + (b - m) ** 2, 0) / arr.length;
+function variance(arr, m) {
+  const a = finiteOnly(arr);
+  if (a.length < 2) return 0;
+  const mu = Number.isFinite(m) ? m : mean(a);
+  return a.reduce((x, y) => x + (y - mu) ** 2, 0) / a.length;
 }
 
-function std(arr, m = mean(arr)) {
+function std(arr, m) {
   return Math.sqrt(variance(arr, m));
 }
 
 // Least-squares slope of `arr` values against their index (0..n-1).
 // Units: value-change per sample.
+// Non-finite samples are skipped (their index positions are preserved).
 function slope(arr) {
-  const n = arr.length;
-  if (n < 2) return 0;
+  if (!Array.isArray(arr)) return 0;
+  let n = 0;
   let sx = 0, sy = 0, sxy = 0, sxx = 0;
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < arr.length; i++) {
+    const y = arr[i];
+    if (typeof y !== 'number' || !Number.isFinite(y)) continue;
+    n++;
     sx += i;
-    sy += arr[i];
-    sxy += i * arr[i];
+    sy += y;
+    sxy += i * y;
     sxx += i * i;
   }
+  if (n < 2) return 0;
   const denom = n * sxx - sx * sx;
   if (denom === 0) return 0;
-  return (n * sxy - sx * sy) / denom;
+  const result = (n * sxy - sx * sy) / denom;
+  return Number.isFinite(result) ? result : 0;
 }
 
 // Mean absolute successive difference — a measure of sample-to-sample
 // "jerkiness" independent of slope, used to spot oscillatory faults
 // (e.g. misfire) that a plain trend/slope check would miss.
 function jerkiness(arr) {
-  if (arr.length < 2) return 0;
+  const a = finiteOnly(arr);
+  if (a.length < 2) return 0;
   let sum = 0;
-  for (let i = 1; i < arr.length; i++) sum += Math.abs(arr[i] - arr[i - 1]);
-  return sum / (arr.length - 1);
+  for (let i = 1; i < a.length; i++) sum += Math.abs(a[i] - a[i - 1]);
+  return sum / (a.length - 1);
 }
 
 // n x n matrix inverse via Gauss-Jordan elimination with a small ridge term
@@ -87,4 +110,4 @@ function matVecMul(matrix, vec) {
   return matrix.map((row) => row.reduce((a, v, j) => a + v * vec[j], 0));
 }
 
-module.exports = { clamp, mean, variance, std, slope, jerkiness, invertMatrix, matVecMul };
+module.exports = { finiteOnly, clamp, mean, variance, std, slope, jerkiness, invertMatrix, matVecMul };

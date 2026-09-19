@@ -13,8 +13,8 @@ is stated plainly rather than glossed over.
 | L0 — Virtual engine | Ground-truth engine physics | `simulator.js`'s live-fleet `EngineTwin` (random-walk + fault drift) drives the always-on dashboard feed; `engine_sim/`'s mean-value physics model (Wiebe-style combustion, ISA altitude derating, thermal lag) is wired in separately via the on-demand mission runner — both exist side by side, see "Two ground-truth sources," below |
 | L1 — Data acquisition / edge | Sensor realism, framing, transport | `simulator.js`'s per-sensor noise/random-walk + threshold classification; transport is **Socket.IO**, not CAN/MQTT (see "What was not built," below) |
 | L2 — Digital twin core | Ingest, live state, history, APIs | `server.js` (Express REST + Socket.IO broadcast); `twin_core/store.js` persists every `engine_sim/` mission run to disk (JSON-Lines) and backs the replay endpoints |
-| L3 — AI/ML analytics | Anomaly detection, RUL, explainability | `analytics/` (rate-aware health index, multivariate Mahalanobis anomaly detector, RUL estimator, offline explainability) runs **inside** `simulator.js`'s per-tick `EngineTwin.step()` — its output rides along on every engine's `analytics` field in `/api/snapshot`; `ai/` (Gemini-based RAG "situation report") runs alongside it in `server.js` |
-| L4 — Dashboard / replay | Operator HMI, mission replay | `public/` (vanilla HTML/CSS/JS + Chart.js dashboard) consumes the live feed; `replay/` streams a recorded `engine_sim/` mission back out over the `replay-frame` Socket.IO event at variable speed, driven by `server.js`'s `/api/engine-sim/replay/*` routes |
+| L3 — AI/ML analytics | Anomaly detection, RUL, explainability | `analytics/` (rate-aware health index, multivariate Mahalanobis anomaly detector, RUL estimator, offline explainability) runs **inside** `simulator.js`'s per-tick `EngineTwin.step()` — its output rides along on every engine's `analytics` field in `/api/snapshot`; `ai/` (RAG "situation report" via Gemini with automatic Groq fallback, then a rule-based sentence) runs alongside it in `server.js` |
+| L4 — Dashboard / replay | Operator HMI, mission replay | `public/` (vanilla HTML/CSS/JS dashboard with a self-hosted canvas chart) consumes the live feed; `replay/` streams a recorded `engine_sim/` mission back out over the `replay-frame` Socket.IO event at variable speed, driven by `server.js`'s `/api/engine-sim/replay/*` routes |
 
 ### Two ground-truth sources, on purpose
 
@@ -58,8 +58,8 @@ natural next step (see `docs/ROADMAP.md`).
                     │  health/RUL/predicted-fault model (today)     │
                     │  analytics/: rate-aware health index,         │
                     │  multivariate anomaly detector, RUL model     │
-                    │  ai/: retriever.js + geminiClient.js +        │
-                    │  analysisEngine.js — RAG situation narrative  │
+                    │  ai/: retriever.js + providers.js (Gemini →   │
+                    │  Groq) + analysisEngine.js — RAG narrative   │
                     └───────────────▲───────────────────────────────┘
                                     │ per-tick engine snapshot (readings, statuses, health, RUL, faults)
                     ┌───────────────┴───────────────────────────────┐
@@ -149,16 +149,57 @@ called out as such rather than implied as done.
   healthy telemetry), RUL estimation, and offline explainability, all
   exposed on each engine's `analytics` field in `/api/snapshot`.
 - **`ai/`** — L3: RAG-based plain-language "situation report" per engine
-  (`knowledgeBase.js` + `retriever.js` + `geminiClient.js` +
-  `analysisEngine.js`), calling the Gemini API with graceful rule-based
-  fallback when no key is configured or a call fails.
+  (`knowledgeBase.js` + `retriever.js` + `analysisEngine.js`), calling an LLM
+  through `providers.js`: Gemini first, Groq as fallback (`geminiClient.js`,
+  `groqClient.js`), with a per-provider circuit breaker/cooldown and
+  per-provider request spacing. When no key is configured, or every provider
+  fails or is cooling down, a rule-based one-line summary is cached instead
+  and flagged `degraded`. Each analysis records `provider`, `fallbackUsed`
+  and `degraded`.
 - **`replay/`** — L4: `missionRunner.js` drives `engine_sim/`'s
   `PhysicsEngine` end-to-end and persists it via `twin_core/`;
   `replayEngine.js` plays a recorded mission back out, paced by its
   original timestamps, over the `replay-frame` Socket.IO event
   (`server.js`'s `/api/engine-sim/replay/:engineId/:missionId` and
   `/control` routes start/pause/resume/seek/stop it).
-- **`public/`** — L4: the operator dashboard (vanilla JS + Chart.js),
+- **`public/js/twin3d.js`** — L4: the 3D visual twin (three.js). Consumes
+  the same per-engine snapshot as the dashboard (`window.twin3d.update`),
+  never recomputes status client-side, and uses `/api/meta` SENSORS bands
+  only to scale visual intensity (glow, shake, flow rate).
+- **`public/`** — L4: the operator dashboard (vanilla JS, self-hosted charts),
   consuming `server.js`'s REST API and Socket.IO stream. Does not yet have
   UI for triggering `engine_sim/` missions or `replay-frame` playback —
   those are API-only today (see `docs/ROADMAP.md`).
+
+## Runtime hardening and operations (v1.1)
+
+Cross-cutting pieces added around the layers above (none change the data
+model):
+
+- **`config.js`** — parses and validates every server-level environment
+  variable once, fails fast with a list of all problems, and never logs
+  secrets. (`GEMINI_*`, `GROQ_*`, `AI_*` and `TWIN_*` variables are read by
+  the modules that own them.) Full reference: `.env.example`.
+- **`middleware/`** — `security.js` (helmet with a CSP matching what
+  `public/index.html` loads, CORS allowlist for REST and Socket.IO,
+  `express-rate-limit` with a stricter tier for mission run / replay / AI
+  refresh, optional `ADMIN_API_KEY` guard on mutating routes), `logger.js`
+  (structured JSON logs in production, request ids), `errors.js` (uniform
+  `{ error, detail? }` responses, no internals in production), `validate.js`
+  (input validation for route parameters and bodies).
+- **Probes** — `GET /api/health` (liveness) and `GET /api/ready` (readiness:
+  fleet snapshot exists, data directory writable, not shutting down) are
+  registered before the rate limiter.
+- **Lifecycle** — `createServer()` builds the app without side effects
+  (used by tests); running `server.js` directly installs SIGTERM/SIGINT
+  handlers that stop the tick loop and replays, close sockets and exit within
+  `SHUTDOWN_TIMEOUT_MS`.
+- **State and scaling** — the live fleet, alert history, AI cache/cooldowns
+  and replay sessions are in-process memory; only `engine_sim/` mission
+  recordings are persisted (`TWIN_DATA_DIR`, bounded by
+  `TWIN_MAX_MISSIONS_PER_ENGINE`). Together with Socket.IO's in-memory adapter
+  this means the service is **single-instance** by design (see
+  `docs/DEPLOYMENT.md`).
+- **Tests and CI** — `tests/server`, `tests/ai`, `tests/core` (`node:test`),
+  ESLint flat config, and a GitHub Actions workflow (lint, test on Node 20/24,
+  audit, Docker build).

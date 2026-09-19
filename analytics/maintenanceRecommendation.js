@@ -32,14 +32,16 @@ const CATEGORY_ACTION = {
  * @returns {string|null}
  */
 function recommend({ flags = [], rul } = {}) {
-  if (!flags.length) return null;
-  const top = flags.slice().sort((a, b) => (SEVERITY_RANK[b.severity] || 0) - (SEVERITY_RANK[a.severity] || 0))[0];
+  if (!Array.isArray(flags) || !flags.length) return null;
+  const top = flags.filter(Boolean).sort((a, b) => (SEVERITY_RANK[b.severity] || 0) - (SEVERITY_RANK[a.severity] || 0))[0];
 
   const action = CATEGORY_ACTION[top.category] || `Investigate ${categoryLabel(top.category)}`;
   // Tighter inspection window for a more severe flag or a shorter RUL runway.
-  const rulWindow = rul && Number.isFinite(rul.rul) ? Math.round(rul.rul * 0.15) : 15;
   const severityWindow = top.severity === 'critical' ? 3 : top.severity === 'warning' ? 10 : 25;
-  const windowHours = clamp(Math.min(rulWindow || severityWindow, severityWindow), 1, 60);
+  // rul.rul === 0 must give the *tightest* window (previously a falsy 0 fell
+  // through to the looser severity window).
+  const rulWindow = rul && Number.isFinite(rul.rul) ? Math.round(Math.max(0, rul.rul) * 0.15) : 15;
+  const windowHours = clamp(Math.min(rulWindow, severityWindow), 1, 60);
 
   return `${action} (${labelFor(top.sensor)}: ${top.evidence}) — inspect within the next ${windowHours} flight hours.`;
 }

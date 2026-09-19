@@ -32,6 +32,10 @@ function categoryLabel(category) { return String(category).replace(/_/g, ' '); }
  * @returns {{ topContributors: Array<{sensor: string, contributionPct: number}>, narrative: string }}
  */
 function explain({ contributions = [], flags = [] } = {}) {
+  // drop malformed / non-finite contributions (NaN would poison the total and every percentage)
+  contributions = (Array.isArray(contributions) ? contributions : [])
+    .filter((c) => c && Number.isFinite(c.contribution));
+  flags = Array.isArray(flags) ? flags.filter(Boolean) : [];
   const total = contributions.reduce((a, c) => a + Math.max(c.contribution, 0), 0) || 1;
   const topContributors = contributions
     .slice()

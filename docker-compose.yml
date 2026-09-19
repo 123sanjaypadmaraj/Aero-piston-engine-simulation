@@ -1,0 +1,38 @@
+name: aero-engine-digital-twin
+# Usage:  cp .env.example .env   (set at least one AI key, optional)
+#         docker compose up -d --build
+# Secrets come from .env via env_file - never inline them here.
+services:
+  twin:
+    build: .
+    image: aero-engine-digital-twin:latest
+    init: true                      # tini-style init: forwards SIGTERM, reaps zombies
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      HOST: 0.0.0.0
+      TWIN_DATA_DIR: /data
+    ports:
+      - "${HOST_PORT:-5000}:5000"
+    volumes:
+      - twin-data:/data             # persisted mission recordings (JSON-Lines)
+    read_only: true                 # root FS is immutable; only /data and /tmp are writable
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s          # keep >= SHUTDOWN_TIMEOUT_MS
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  twin-data:

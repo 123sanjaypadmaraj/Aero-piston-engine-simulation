@@ -73,10 +73,11 @@ details may differ from this card.
     engineering diagnosis.
   - **Not validated against any real engine telemetry.**
 
-## 3. `ai/` — RAG + Gemini "AI Engine Situation" narrative
+## 3. `ai/` — RAG + LLM (Gemini, Groq fallback) "AI Engine Situation" narrative
 
 **Status:** implemented, running today (`ai/knowledgeBase.js`,
-`ai/retriever.js`, `ai/geminiClient.js`, `ai/analysisEngine.js`).
+`ai/retriever.js`, `ai/providers.js`, `ai/geminiClient.js`,
+`ai/groqClient.js`, `ai/analysisEngine.js`).
 
 - **Purpose:** turn the current numeric snapshot for one engine into a
   short plain-language situation report for a flight-ops officer (e.g.
@@ -86,30 +87,39 @@ details may differ from this card.
   hand-tagged knowledge base (`knowledgeBase.js`) — tag-overlap retrieval
   (`retriever.js`, not embeddings/vector search) against the engine's
   active/predicted fault and any out-of-nominal sensors, then a single
-  Gemini `generateContent` call (`geminiClient.js`) grounded on the
-  retrieved docs plus the live telemetry JSON.
+  LLM call grounded on the retrieved docs plus the live telemetry JSON. The
+  call goes to Gemini (`geminiClient.js`) first and falls back to Groq
+  (`groqClient.js`, default model `llama-3.3-70b-versatile`) via the provider
+  pool in `providers.js` (order: `AI_PROVIDER_ORDER`).
 - **Inputs:** one engine's full snapshot (readings, statuses, health, RUL,
   active/predicted fault, recent alerts, altitude/airspeed/hours) plus
   fleet-level context (mission reliability, critical-engine count).
 - **Outputs:** a ≤120-word narrative, cached per engine, re-generated when
   the engine's severity/fault state changes or after
-  `AI_ANALYSIS_INTERVAL_MS` (default 5 min) elapses, throttled globally by
-  `GEMINI_MIN_GAP_MS` (default 13s) to avoid bursting free-tier Gemini rate
-  limits.
+  `AI_ANALYSIS_INTERVAL_MS` (default 5 min) elapses, throttled per provider by
+  `GEMINI_MIN_GAP_MS` (default 13s) / `GROQ_MIN_GAP_MS` (default 2s) to avoid
+  bursting free-tier rate limits. Each result records which provider wrote it
+  (`provider`), whether a non-primary provider was used (`fallbackUsed`) and
+  whether it is the static fallback (`degraded`).
 - **Known limitations:**
   - The narrative is only as correct as the underlying rule-based health/
-    fault model (model 1 above) that feeds it — Gemini is grounding
+    fault model (model 1 above) that feeds it — the LLM is grounding
     language on numbers the simulator produced, not independently
     reasoning about engine physics.
   - Retrieval is tag-based over a small hand-curated corpus; it will not
     surface relevant knowledge outside that corpus's coverage, and
     silently degrades to "nothing relevant retrieved" rather than erroring.
-  - **Fails soft by design:** if `GEMINI_API_KEY` is unset or a call
-    errors/times out/rate-limits, a one-line rule-based fallback sentence
-    is shown instead, clearly distinguishable in the response (`error`
-    field set, `model: null`) but visually similar in the dashboard —
-    operators should not assume every situation-report line came from the
-    LLM.
+  - **Fails soft by design:** each provider has a circuit breaker. If
+    Gemini is unkeyed, rate-limited (429), erroring or timing out, it is put
+    in a cooldown (`AI_PROVIDER_COOLDOWN_MS`, default 5 min) and Groq is
+    used if configured. If no provider can answer, a one-line rule-based
+    fallback sentence is shown instead, flagged in the response
+    (`degraded: true`, `provider: null`, `error` set). Two different LLMs
+    can word the same situation differently and neither is validated;
+    operators should not assume every situation-report line came from an
+    LLM, or that two providers' phrasing implies different conclusions.
   - Not a safety-of-flight system: this is a demo/explanatory layer, not a
-    certified advisory source, and it depends on an external third-party
-    API (Gemini) being reachable and within quota.
+    certified advisory source, and it depends on external third-party
+    APIs (Gemini, Groq) being reachable and within quota. Prompts contain
+    only simulated telemetry; if this were ever connected to real data,
+    sending it to third-party LLM APIs would need a data-handling review.

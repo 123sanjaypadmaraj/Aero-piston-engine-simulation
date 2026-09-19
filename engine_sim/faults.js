@@ -15,12 +15,16 @@
 function clamp01(v) { return Math.max(0, Math.min(1, v)); }
 
 function severityAt(schedule, t) {
-  const { onset, rampS, holdS, recoveryS, peak } = schedule;
+  if (!schedule || !Number.isFinite(t)) return 0;
+  const { onset, rampS, holdS, recoveryS } = schedule;
+  // A malformed schedule (NaN/negative fields) yields "no fault" rather than NaN.
+  if (![onset, rampS, holdS].every(Number.isFinite) || rampS < 0 || holdS < 0) return 0;
+  const peak = clamp01(Number.isFinite(schedule.peak) ? schedule.peak : 0);
   if (t < onset) return 0;
   const sinceOnset = t - onset;
   if (sinceOnset < rampS) return peak * (sinceOnset / rampS);
   if (sinceOnset < rampS + holdS) return peak;
-  if (!recoveryS) return peak;
+  if (!(recoveryS > 0)) return peak;
   const sinceRecoveryStart = sinceOnset - rampS - holdS;
   if (sinceRecoveryStart < recoveryS) return peak * (1 - sinceRecoveryStart / recoveryS);
   return 0;
@@ -94,13 +98,15 @@ function computeSeverities(activeSchedule, t) {
 
 /** Applies all active faults' perturbations to a clean reading, returning the perturbed reading. */
 function applyFaults(cleanReading, severities, t = 0) {
-  let reading = { ...cleanReading };
+  const reading = { ...cleanReading };
   for (const [type, severity] of Object.entries(severities)) {
-    if (severity <= 0) continue;
+    if (!(severity > 0)) continue; // also skips NaN
     const applicator = FAULT_APPLICATORS[type];
     if (!applicator) continue;
     const patch = applicator(reading, severity, t);
-    reading = { ...reading, ...patch };
+    for (const [k, v] of Object.entries(patch)) {
+      if (Number.isFinite(v)) reading[k] = v; // ignore a non-finite override, keep the clean value
+    }
   }
   return reading;
 }

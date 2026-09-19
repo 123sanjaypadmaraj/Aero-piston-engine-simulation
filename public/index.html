@@ -3,15 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Real-time digital twin dashboard for aero piston engine health monitoring, fault prediction and mission reliability on MALE UAVs. Simulated telemetry, Smart India Hackathon demonstration build." />
+  <meta name="theme-color" content="#08080a" />
+  <meta name="color-scheme" content="dark" />
   <title>Aero Engine Digital Twin | SIH</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛩️</text></svg>" />
+  <link rel="icon" type="image/svg+xml" href="img/favicon.svg" />
+  <!-- Optional web font: the page falls back to Consolas/system monospace if this origin is blocked or offline. -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <div class="bg-grid"></div>
+  <a class="skip-link" href="#main">Skip to dashboard</a>
+  <div class="bg-grid" aria-hidden="true"></div>
 
   <div class="classification-strip">
     <span>UNCLASSIFIED // SIH DEMONSTRATION BUILD</span>
@@ -20,7 +25,7 @@
 
   <header class="topbar">
     <div class="brand">
-      <div class="brand-mark">✈</div>
+      <div class="brand-mark" aria-hidden="true">✈</div>
       <div class="brand-text">
         <h1>Aero Engine Digital Twin <span class="sys-tag">SYS/DT&#8209;04</span></h1>
         <p>Real-Time Health Monitoring &amp; Fault Prediction — Aero Piston Engines, MALE UAV Fleet</p>
@@ -28,336 +33,169 @@
     </div>
     <div class="topbar-right">
       <div class="badge-strip" title="Smart India Hackathon prototype">
-        <span class="chip chip-saffron"></span><span class="chip chip-white"></span><span class="chip chip-green"></span>
+        <span class="chip chip-saffron" aria-hidden="true"></span><span class="chip chip-white" aria-hidden="true"></span><span class="chip chip-green" aria-hidden="true"></span>
         <span class="sih-label">SIH Prototype</span>
       </div>
-      <div class="clock" id="clock">--:--:--</div>
-      <div class="conn" id="connStatus"><span class="dot"></span><span class="conn-text">Connecting…</span></div>
+      <div class="clock" id="clock" role="timer" aria-label="Local time">--:--:--</div>
+      <div class="conn" id="connStatus" role="status" data-state="connecting"><span class="dot" aria-hidden="true"></span><span class="conn-text">Connecting…</span></div>
     </div>
   </header>
 
-  <main class="layout">
+  <!-- Telemetry health banner: shown when the feed stalls or the link drops. -->
+  <div class="stale-banner" id="staleBanner" role="alert" hidden>
+    <span class="stale-icon" aria-hidden="true">▲</span>
+    <span class="stale-text" id="staleText">TELEMETRY STALE — values may be out of date</span>
+    <span class="stale-age" id="staleAge" aria-hidden="true"></span>
+    <button type="button" class="stale-retry" id="staleRetry">Retry now</button>
+  </div>
+
+  <main class="layout" id="main">
+    <h2 class="sr-only">Fleet dashboard</h2>
+
     <!-- Fleet summary -->
-    <section class="fleet-summary">
+    <section class="fleet-summary" aria-label="Fleet summary">
       <div class="stat-card">
         <div class="stat-label">Mission Reliability</div>
         <div class="stat-value" id="statReliability">--%</div>
-        <div class="stat-bar"><div class="stat-bar-fill" id="statReliabilityBar"></div></div>
+        <div class="stat-bar" aria-hidden="true"><div class="stat-bar-fill" id="statReliabilityBar"></div></div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Avg Fleet Health</div>
         <div class="stat-value" id="statHealth">--%</div>
-        <div class="stat-bar"><div class="stat-bar-fill health" id="statHealthBar"></div></div>
+        <div class="stat-bar" aria-hidden="true"><div class="stat-bar-fill health" id="statHealthBar"></div></div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Engines // Critical</div>
-        <div class="stat-value" id="statCritical">0</div>
+        <div class="stat-value" id="statCritical">--</div>
         <div class="stat-sub">of fleet total</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">UAVs Monitored</div>
-        <div class="stat-value" id="statEngines">3</div>
-        <div class="stat-sub">live telemetry link</div>
+        <div class="stat-value" id="statEngines">--</div>
+        <div class="stat-sub" id="statLinkSub">awaiting telemetry link</div>
       </div>
     </section>
 
     <!-- Engine picker cards -->
-    <section class="engine-cards" id="engineCards"></section>
+    <section class="engine-cards" id="engineCards" role="group" aria-label="Select an engine">
+      <p class="empty-note" id="enginesEmpty">Waiting for telemetry…</p>
+    </section>
 
     <div class="main-grid">
       <!-- Sensor detail -->
-      <section class="panel detail-panel">
+      <section class="panel detail-panel" aria-labelledby="detailTitle">
         <div class="panel-head">
           <h2 id="detailTitle">Engine Detail</h2>
-          <span class="badge" id="detailStatus">NOMINAL</span>
+          <span class="badge" id="detailStatus">--</span>
         </div>
 
-        <div class="ai-analysis" id="aiAnalysisBox">
+        <!-- AI situation report: three visually distinct states (Gemini live / Groq fallback / rule-based, no AI). -->
+        <div class="ai-analysis" id="aiAnalysisBox" data-state="pending" aria-labelledby="aiHeading" role="region">
           <div class="ai-head">
-            <h3><span class="ai-tag">AI</span> Engine Situation Report</h3>
-            <button class="ai-refresh-btn" id="aiRefreshBtn" type="button" title="Ask Gemini to re-analyze this engine right now">Explain now</button>
+            <h3 id="aiHeading"><span class="ai-tag" id="aiTag">AI</span> <span id="aiTitle">Engine Situation Report</span></h3>
+            <div class="ai-head-right">
+              <span class="ai-source" id="aiSource" hidden></span>
+              <button class="ai-refresh-btn" id="aiRefreshBtn" type="button" title="Ask the AI provider to re-analyze this engine right now">Explain now</button>
+            </div>
           </div>
-          <p class="ai-text" id="aiText">Waiting for the first AI analysis…</p>
+          <p class="ai-banner" id="aiBanner" hidden></p>
+          <p class="ai-stale" id="aiStale" hidden></p>
+          <p class="ai-text ai-loading" id="aiText">Waiting for the first AI analysis…</p>
+          <details class="ai-details" id="aiDetails" hidden>
+            <summary>Why is AI unavailable?</summary>
+            <p id="aiReason"></p>
+          </details>
           <div class="ai-meta" id="aiMeta"></div>
+          <p class="ai-disclaimer">Advisory only. Generated text is not a maintenance or flight-safety decision; verify against the sensor readings and follow approved procedures.</p>
         </div>
 
         <div class="predicted-fault" id="predictedFaultBox" hidden>
-          <div class="pf-icon">⚠</div>
+          <div class="pf-icon" aria-hidden="true">⚠</div>
           <div>
             <div class="pf-title" id="pfTitle">—</div>
             <div class="pf-sub" id="pfSub">—</div>
           </div>
-          <div class="pf-confidence" id="pfConfidence">0%</div>
+          <div class="pf-confidence" id="pfConfidence"></div>
         </div>
 
         <div class="engine-diagram-wrap">
           <div class="engine-diagram-head">
-            <h3>Aero Piston Engine // Live Component Map</h3>
-            <div class="engine-legend">
-              <span><i class="dot nominal"></i>Nominal</span>
-              <span><i class="dot warning"></i>Warning</span>
-              <span><i class="dot critical"></i>Critical</span>
+            <h3>Aero Piston Engine // 3D Digital Twin</h3>
+            <div class="engine-legend" aria-label="Status legend">
+              <span><i class="dot nominal" aria-hidden="true"></i>Nominal</span>
+              <span><i class="dot warning" aria-hidden="true"></i>Warning ▲</span>
+              <span><i class="dot critical" aria-hidden="true"></i>Critical ✖</span>
             </div>
           </div>
 
-          <div class="engine-photo-stage">
-            <img class="engine-photo" src="img/engine-photo.png" alt="Air-cooled aero piston engine with propeller — the live component map for telemetry glow overlays" />
-            <svg class="engine-marks" viewBox="0 0 516 387" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Live status glow markers over engine components">
-              <defs>
-                <filter id="glowNominal" x="-200%" y="-200%" width="500%" height="500%">
-                  <feDropShadow dx="0" dy="0" stdDeviation="3.2" flood-color="#22c55e" flood-opacity="0.9"/>
-                </filter>
-                <filter id="glowWarning" x="-200%" y="-200%" width="500%" height="500%">
-                  <feDropShadow dx="0" dy="0" stdDeviation="4.5" flood-color="#ff9d1f" flood-opacity="0.95"/>
-                </filter>
-                <filter id="glowCritical" x="-260%" y="-260%" width="620%" height="620%">
-                  <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#ff3b30" flood-opacity="1"/>
-                </filter>
-              </defs>
+          <div class="twin-wrap">
+          <div class="twin-stage" id="twinStage">
+            <div id="twinCanvasHost" class="twin-canvas-host" role="img" aria-label="3D model of a six-cylinder horizontally opposed aero piston engine. Live sensor readouts are listed below the model."></div>
+            <div id="twinPins" class="twin-pins"></div>
 
-              <!-- 1 Cylinder heads -->
-              <g id="part-cht" class="engine-part" data-part="cht">
-                <title>Cylinder Head Temp: -- &#176;C</title>
-                <circle class="mark-ring" cx="150" cy="168" r="20"/>
-                <circle class="mark-dot" cx="150" cy="168" r="7"/>
-                <text class="mark-num" x="150" y="172">1</text>
-              </g>
+            <div class="twin-toolbar" role="toolbar" aria-label="3D twin controls">
+              <div class="tt-group" role="group" aria-label="Camera views">
+                <button type="button" data-view="iso" class="active" aria-pressed="true">Iso</button>
+                <button type="button" data-view="front" aria-pressed="false">Front</button>
+                <button type="button" data-view="side" aria-pressed="false">Side</button>
+                <button type="button" data-view="top" aria-pressed="false">Top</button>
+                <button type="button" data-view="rear" aria-pressed="false">Rear</button>
+              </div>
+              <div class="tt-group" role="group" aria-label="Display layers">
+                <button type="button" id="twinXray" title="Ghost the casings to see pistons, rods and crank">X-ray</button>
+                <button type="button" id="twinExplode" title="Separate the assemblies">Explode</button>
+                <button type="button" id="twinFlow" title="Air, fuel, exhaust and oil flow">Flow</button>
+                <button type="button" id="twinLabels" title="Numbered component markers">Labels</button>
+                <button type="button" id="twinSpin" title="Auto-orbit camera">Orbit</button>
+              </div>
+              <label class="tt-slow" title="Real shaft speed (~5000 RPM) would alias on screen, so the twin runs in slow motion">
+                <span>Slow-mo <b id="twinSlowLabel">1:60</b></span>
+                <input type="range" id="twinSlow" min="0" max="100" step="1" value="39" aria-label="Slow-motion ratio" />
+              </label>
+            </div>
 
-              <!-- 2 Exhaust headers -->
-              <g id="part-egt" class="engine-part" data-part="egt">
-                <title>Exhaust Gas Temp: -- &#176;C</title>
-                <circle class="mark-ring" cx="95" cy="292" r="20"/>
-                <circle class="mark-dot" cx="95" cy="292" r="7"/>
-                <text class="mark-num" x="95" y="296">2</text>
-              </g>
+            <div class="twin-hud" id="twinHud" aria-hidden="true"></div>
 
-              <!-- 3 Oil sump / pump -->
-              <g id="part-oilPressure" class="engine-part" data-part="oilPressure">
-                <title>Oil Pressure: -- psi</title>
-                <circle class="mark-ring" cx="238" cy="288" r="20"/>
-                <circle class="mark-dot" cx="238" cy="288" r="7"/>
-                <text class="mark-num" x="238" y="292">3</text>
-              </g>
+            <aside class="twin-detail" id="twinDetail" hidden aria-label="Selected component detail">
+              <div class="td-head">
+                <span class="td-title">—</span>
+                <span class="td-badge">NOMINAL</span>
+                <button type="button" class="td-close" aria-label="Close component detail">×</button>
+              </div>
+              <div class="td-reading"><span class="td-value">--</span><span class="td-sensor">—</span></div>
+              <canvas width="480" height="90" role="img" aria-label="Recent sensor trend"></canvas>
+              <div class="td-band"></div>
+              <p class="td-blurb"></p>
+            </aside>
 
-              <!-- 4 Oil cooler -->
-              <g id="part-oilTemp" class="engine-part" data-part="oilTemp">
-                <title>Oil Temperature: -- &#176;C</title>
-                <circle class="mark-ring" cx="74" cy="234" r="20"/>
-                <circle class="mark-dot" cx="74" cy="234" r="7"/>
-                <text class="mark-num" x="74" y="238">4</text>
-              </g>
-
-              <!-- 5 Carburetors / fuel line -->
-              <g id="part-fuelFlow" class="engine-part" data-part="fuelFlow">
-                <title>Fuel Flow: -- L/h</title>
-                <circle class="mark-ring" cx="196" cy="95" r="20"/>
-                <circle class="mark-dot" cx="196" cy="95" r="7"/>
-                <text class="mark-num" x="196" y="99">5</text>
-              </g>
-
-              <!-- 6 Intake manifold -->
-              <g id="part-manifoldPressure" class="engine-part" data-part="manifoldPressure">
-                <title>Manifold Pressure: -- kPa</title>
-                <circle class="mark-ring" cx="157" cy="118" r="20"/>
-                <circle class="mark-dot" cx="157" cy="118" r="7"/>
-                <text class="mark-num" x="157" y="122">6</text>
-              </g>
-
-              <!-- 7 Crankcase -->
-              <g id="part-vibration" class="engine-part" data-part="vibration">
-                <title>Vibration: -- mm/s</title>
-                <circle class="mark-ring" cx="250" cy="176" r="20"/>
-                <circle class="mark-dot" cx="250" cy="176" r="7"/>
-                <text class="mark-num" x="250" y="180">7</text>
-              </g>
-
-              <!-- 8 Prop gearbox / flange -->
-              <g id="part-rpm" class="engine-part" data-part="rpm">
-                <title>Engine Speed: -- RPM</title>
-                <circle class="mark-ring" cx="301" cy="157" r="20"/>
-                <circle class="mark-dot" cx="301" cy="157" r="7"/>
-                <text class="mark-num" x="301" y="161">8</text>
-              </g>
-
-              <!-- 9 Alternator / battery bus -->
-              <g id="part-batteryVoltage" class="engine-part" data-part="batteryVoltage">
-                <title>Battery Voltage: -- V</title>
-                <circle class="mark-ring" cx="250" cy="87" r="20"/>
-                <circle class="mark-dot" cx="250" cy="87" r="7"/>
-                <text class="mark-num" x="250" y="91">9</text>
-              </g>
-            </svg>
+            <div class="twin-loading" id="twinLoading" role="status">Loading 3D twin…</div>
+          </div>
+          <div class="twin-rail" id="twinRail" role="group" aria-label="Live sensor readouts"></div>
           </div>
 
-          <p class="engine-recreation-label">Recreated Component Outline — Vector Twin, Same Live Telemetry</p>
-          <div class="engine-recreation-stage">
-            <svg class="engine-recreation" viewBox="0 0 516 387" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Full outline recreation of the aero piston engine, built from individually glowing component shapes">
-
-              <!-- Propeller blades (static, non-instrumented) -->
-              <g class="recon-static-group">
-                <path class="recon-static no-fill" d="M352,188 C356,155 366,115 380,78 C388,58 397,42 406,30 L419,26 C413,42 402,78 392,112 C383,145 372,172 362,196 Z"/>
-                <path class="recon-static no-fill" d="M336,202 C325,232 309,270 296,302 C288,322 285,342 290,359 C299,366 314,362 323,347 C338,321 350,291 357,262 C362,242 359,218 351,204 Z"/>
-              </g>
-
-              <!-- Spinner cone (static, non-instrumented) -->
-              <g class="recon-static-group">
-                <path class="recon-static" d="M344,134 C378,118 418,128 448,153 C461,162 469,171 469,177 C469,183 461,192 448,200 C418,225 378,235 344,219 C337,209 334,189 334,177 C334,164 337,144 344,134 Z"/>
-                <path class="recon-fin" d="M352,145 C380,138 415,145 440,163"/>
-                <path class="recon-fin" d="M352,210 C380,217 415,210 440,193"/>
-              </g>
-
-              <!-- 8 Prop hub / flange -->
-              <g id="part-rpm-recon" class="recon-part" data-part="rpm">
-                <title>Engine Speed: -- RPM</title>
-                <circle class="recon-shape" cx="339" cy="177" r="40"/>
-                <circle class="recon-shape" cx="339" cy="177" r="11"/>
-                <circle class="recon-shape" cx="379" cy="177" r="3"/>
-                <circle class="recon-shape" cx="359" cy="142.4" r="3"/>
-                <circle class="recon-shape" cx="319" cy="142.4" r="3"/>
-                <circle class="recon-shape" cx="299" cy="177" r="3"/>
-                <circle class="recon-shape" cx="319" cy="211.6" r="3"/>
-                <circle class="recon-shape" cx="359" cy="211.6" r="3"/>
-              </g>
-
-              <!-- 7 Crankcase -->
-              <g id="part-vibration-recon" class="recon-part" data-part="vibration">
-                <title>Vibration: -- mm/s</title>
-                <path class="recon-shape" d="M196,150 C206,118 248,101 292,105 C318,108 334,124 339,146 L339,210 C334,231 313,247 286,250 C249,254 212,241 197,214 C188,194 188,169 196,150 Z"/>
-                <path class="recon-fin" d="M205,130 C240,118 280,118 320,132"/>
-                <path class="recon-fin" d="M200,175 C240,168 290,168 335,178"/>
-                <path class="recon-fin" d="M205,205 C240,218 285,222 330,208"/>
-              </g>
-
-              <!-- Ignition harness (static, non-instrumented) -->
-              <g class="recon-static-group">
-                <path class="recon-wire" d="M25,95 C70,65 120,60 160,75 C185,84 200,70 215,60"/>
-                <path class="recon-wire" d="M20,108 C65,130 130,128 175,105 C195,95 205,80 218,72"/>
-                <path class="recon-wire" d="M40,118 C90,138 150,140 195,118"/>
-              </g>
-
-              <!-- 5 Fuel servo / carburetor -->
-              <g id="part-fuelFlow-recon" class="recon-part" data-part="fuelFlow">
-                <title>Fuel Flow: -- L/h</title>
-                <rect class="recon-shape" x="182" y="68" width="58" height="36" rx="6"/>
-                <rect class="recon-shape" x="190" y="57" width="9" height="13" rx="2"/>
-                <rect class="recon-shape" x="211" y="57" width="9" height="13" rx="2"/>
-              </g>
-
-              <!-- 9 Alternator / battery bus -->
-              <g id="part-batteryVoltage-recon" class="recon-part" data-part="batteryVoltage">
-                <title>Battery Voltage: -- V</title>
-                <rect class="recon-shape" x="245" y="58" width="42" height="34" rx="6"/>
-                <circle class="recon-shape" cx="266" cy="95" r="9"/>
-              </g>
-
-              <!-- 6 Intake manifold -->
-              <g id="part-manifoldPressure-recon" class="recon-part" data-part="manifoldPressure">
-                <title>Manifold Pressure: -- kPa</title>
-                <path class="recon-shape no-fill" d="M185,104 C140,108 100,112 80,118"/>
-                <path class="recon-shape no-fill" d="M195,104 C170,115 140,122 122,130"/>
-                <path class="recon-shape no-fill" d="M215,104 C195,130 185,165 176,178"/>
-              </g>
-
-              <!-- 1 Cylinder heads -->
-              <g id="part-cht-recon" class="recon-part" data-part="cht">
-                <title>Cylinder Head Temp: -- &#176;C</title>
-                <g transform="translate(78,132) rotate(-18)">
-                  <rect class="recon-shape" x="-29" y="-44" width="58" height="88" rx="10"/>
-                  <ellipse class="recon-shape" cx="0" cy="-58" rx="23" ry="13"/>
-                  <path class="recon-fin" d="M-25,-30 L25,-30"/>
-                  <path class="recon-fin" d="M-25,-14 L25,-14"/>
-                  <path class="recon-fin" d="M-25,2 L25,2"/>
-                  <path class="recon-fin" d="M-25,18 L25,18"/>
-                  <circle class="recon-boot" cx="8" cy="30" r="9"/>
-                </g>
-                <g transform="translate(122,168) rotate(-14)">
-                  <rect class="recon-shape" x="-35" y="-52" width="70" height="104" rx="12"/>
-                  <ellipse class="recon-shape" cx="0" cy="-67" rx="28" ry="15"/>
-                  <path class="recon-fin" d="M-30,-34 L30,-34"/>
-                  <path class="recon-fin" d="M-30,-15 L30,-15"/>
-                  <path class="recon-fin" d="M-30,4 L30,4"/>
-                  <path class="recon-fin" d="M-30,23 L30,23"/>
-                  <circle class="recon-boot" cx="10" cy="36" r="11"/>
-                </g>
-                <g transform="translate(176,210) rotate(-10)">
-                  <rect class="recon-shape" x="-42" y="-62" width="84" height="124" rx="14"/>
-                  <ellipse class="recon-shape" cx="0" cy="-79" rx="33" ry="17"/>
-                  <path class="recon-fin" d="M-36,-40 L36,-40"/>
-                  <path class="recon-fin" d="M-36,-17 L36,-17"/>
-                  <path class="recon-fin" d="M-36,6 L36,6"/>
-                  <path class="recon-fin" d="M-36,29 L36,29"/>
-                  <circle class="recon-boot" cx="12" cy="43" r="13"/>
-                </g>
-              </g>
-
-              <!-- 4 Oil cooler -->
-              <g id="part-oilTemp-recon" class="recon-part" data-part="oilTemp">
-                <title>Oil Temperature: -- &#176;C</title>
-                <rect class="recon-shape" x="32" y="196" width="52" height="62" rx="6"/>
-                <path class="recon-fin" d="M42,202 L42,252"/>
-                <path class="recon-fin" d="M52,202 L52,252"/>
-                <path class="recon-fin" d="M62,202 L62,252"/>
-                <path class="recon-fin" d="M72,202 L72,252"/>
-              </g>
-
-              <!-- 2 Exhaust headers -->
-              <g id="part-egt-recon" class="recon-part" data-part="egt">
-                <title>Exhaust Gas Temp: -- &#176;C</title>
-                <path class="recon-shape recon-pipe no-fill" d="M90,176 C72,206 58,236 52,264 C49,282 49,300 51,316"/>
-                <path class="recon-shape recon-pipe no-fill" d="M132,214 C107,244 87,269 74,293 C68,305 63,312 58,318"/>
-                <path class="recon-shape recon-pipe no-fill" d="M182,252 C150,275 116,296 90,312 C78,320 67,324 60,326"/>
-                <path class="recon-shape recon-pipe no-fill" d="M51,316 C52,326 56,334 66,338 L18,338"/>
-                <path class="recon-pipe-highlight no-fill" d="M88,178 C71,207 58,236 53,264 C50,282 50,299 52,314"/>
-                <path class="recon-pipe-highlight no-fill" d="M130,216 C106,245 87,269 75,292 C69,304 64,311 59,317"/>
-                <path class="recon-pipe-highlight no-fill" d="M180,254 C149,276 116,296 91,311 C79,319 68,323 61,325"/>
-                <path class="recon-pipe-highlight no-fill" d="M52,314 C53,323 57,330 66,334 L24,334"/>
-              </g>
-
-              <!-- 3 Oil sump / pump -->
-              <g id="part-oilPressure-recon" class="recon-part" data-part="oilPressure">
-                <title>Oil Pressure: -- psi</title>
-                <path class="recon-shape" d="M205,268 C205,258 213,252 225,252 L255,252 C267,252 275,258 275,268 L275,300 C275,312 265,320 250,320 C235,320 222,314 212,304 C206,297 205,285 205,268 Z"/>
-                <path class="recon-wire" d="M245,252 C248,240 255,230 262,222"/>
-              </g>
-            </svg>
-          </div>
-          <p class="engine-diagram-caption">SAME 9 LIVE SENSORS, DRAWN AS AN OUTLINE TWIN — EACH SHAPE GLOWS WITH ITS OWN COMPONENT STATUS</p>
-
-          <div class="engine-key-list" id="engineKeyList">
-            <div class="key-item"><span class="key-num">1</span><span class="key-name">Cylinder Heads</span></div>
-            <div class="key-item"><span class="key-num">2</span><span class="key-name">Exhaust Headers</span></div>
-            <div class="key-item"><span class="key-num">3</span><span class="key-name">Oil Sump / Pump</span></div>
-            <div class="key-item"><span class="key-num">4</span><span class="key-name">Oil Cooler</span></div>
-            <div class="key-item"><span class="key-num">5</span><span class="key-name">Carburetors / Fuel Line</span></div>
-            <div class="key-item"><span class="key-num">6</span><span class="key-name">Intake Manifold</span></div>
-            <div class="key-item"><span class="key-num">7</span><span class="key-name">Crankcase</span></div>
-            <div class="key-item"><span class="key-num">8</span><span class="key-name">Prop Gearbox / Flange</span></div>
-            <div class="key-item"><span class="key-num">9</span><span class="key-name">Alternator / Battery Bus</span></div>
-          </div>
-
-          <p class="engine-diagram-caption">HOVER ANY NUMBERED MARKER FOR ITS LIVE READING — GLOW COLOUR MIRRORS SENSOR STATUS BELOW</p>
+          <p class="engine-diagram-caption">DRAG TO ORBIT · SCROLL TO ZOOM · CLICK A COMPONENT FOR ITS LIVE READING — SURFACE GLOW FOLLOWS THE BACKEND SENSOR STATUS</p>
         </div>
 
         <div class="chart-row">
           <div class="chart-box">
             <h3>Cylinder Head &amp; Exhaust Gas Temperature</h3>
-            <canvas id="chartTemp" height="140"></canvas>
+            <canvas id="chartTemp" height="140" role="img" aria-label="Cylinder head and exhaust gas temperature trend"></canvas>
           </div>
           <div class="chart-box">
             <h3>Oil Pressure &amp; Vibration</h3>
-            <canvas id="chartOilVib" height="140"></canvas>
+            <canvas id="chartOilVib" height="140" role="img" aria-label="Oil pressure and vibration trend"></canvas>
           </div>
         </div>
 
       </section>
 
       <!-- Alerts feed -->
-      <section class="panel alerts-panel">
+      <section class="panel alerts-panel" aria-labelledby="alertsTitle">
         <div class="panel-head">
-          <h2>Fault Prediction / Alert Log</h2>
-          <span class="live-dot">● LIVE</span>
+          <h2 id="alertsTitle">Fault Prediction / Alert Log</h2>
+          <span class="live-dot" id="liveDot">● LIVE</span>
         </div>
-        <div class="alerts-list" id="alertsList">
+        <div class="alerts-list" id="alertsList" role="list" tabindex="0" aria-label="Alert log, newest first">
           <div class="alerts-empty">Waiting for telemetry…</div>
         </div>
       </section>
@@ -368,8 +206,32 @@
     FIG. 1 — SIMULATED TELEMETRY, DEMONSTRATION BUILD (SMART INDIA HACKATHON PROTOTYPE) · NOT CONNECTED TO A REAL UAV OR FADEC BUS
   </footer>
 
+  <!-- Non-blocking messages -->
+  <div class="toasts" id="toasts" role="region" aria-label="Notifications" aria-live="polite"></div>
+  <!-- Screen-reader announcements: polite for status, assertive only for new critical alerts -->
+  <div class="sr-only" id="srStatus" aria-live="polite" aria-atomic="true"></div>
+  <div class="sr-only" id="srCritical" role="alert" aria-live="assertive" aria-atomic="true"></div>
+
+  <!-- API key prompt, opened only if a mutating request returns 401 -->
+  <dialog class="key-dialog" id="keyDialog" aria-labelledby="keyDialogTitle">
+    <form method="dialog" id="keyForm">
+      <h2 id="keyDialogTitle">API key required</h2>
+      <p>This action needs the server's admin API key. It is kept for this browser tab only.</p>
+      <label for="keyInput">API key</label>
+      <input type="password" id="keyInput" autocomplete="off" spellcheck="false" />
+      <div class="key-actions">
+        <button type="button" id="keyCancel">Cancel</button>
+        <button type="submit" class="primary">Use key</button>
+      </div>
+    </form>
+  </dialog>
+
+  <noscript><p class="noscript-note">This dashboard needs JavaScript to show live telemetry.</p></noscript>
+
   <script src="/socket.io/socket.io.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
+  <script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/"}}</script>
+  <script src="js/charts.js"></script>
   <script src="js/app.js"></script>
+  <script type="module" src="js/twin3d.js"></script>
 </body>
 </html>

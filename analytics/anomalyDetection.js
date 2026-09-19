@@ -23,11 +23,20 @@ const DEFAULT_FEATURE_ORDER = [
   'rpm', 'cht', 'egt', 'oilPressure', 'oilTemp', 'fuelFlow', 'vibration', 'manifoldPressure', 'batteryVoltage',
 ];
 
-function toVector(sample, order) {
-  return order.map((k) => {
-    const v = sample[k];
-    return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+// A missing/non-finite feature becomes `fallback[i]` (the healthy mean when the
+// caller has one, so it contributes zero deviation) or 0 if no fallback given.
+function toVector(sample, order, fallback) {
+  return order.map((k, i) => {
+    const v = sample ? sample[k] : undefined;
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    return fallback && Number.isFinite(fallback[i]) ? fallback[i] : 0;
   });
+}
+
+const MAX_SCORE = 1e6; // cap: a near-constant training feature can otherwise blow the score up to Infinity
+
+function isCleanSample(sample, order) {
+  return !!sample && order.every((k) => typeof sample[k] === 'number' && Number.isFinite(sample[k]));
 }
 
 function computeMeanCov(vectors) {
@@ -50,6 +59,9 @@ function computeMeanCov(vectors) {
 
 class MultivariateAnomalyDetector {
   constructor(featureOrder = DEFAULT_FEATURE_ORDER) {
+    if (!Array.isArray(featureOrder) || !featureOrder.length) {
+      throw new TypeError('MultivariateAnomalyDetector: featureOrder must be a non-empty array');
+    }
     this.featureOrder = featureOrder;
     this.mu = null;
     this.covInv = null;
@@ -59,15 +71,33 @@ class MultivariateAnomalyDetector {
 
   /** @param {Array<Object<string, number>>} healthySamples */
   fit(healthySamples) {
-    if (!healthySamples || healthySamples.length < 3) {
+    if (!Array.isArray(healthySamples) || healthySamples.length < 3) {
       throw new Error('MultivariateAnomalyDetector.fit requires at least 3 samples');
     }
-    const vectors = healthySamples.map((s) => toVector(s, this.featureOrder));
+    // samples with any NaN/missing feature would drag the fitted mean/covariance
+    // toward 0, so they are excluded rather than zero-filled
+    const clean = healthySamples.filter((s) => isCleanSample(s, this.featureOrder));
+    if (clean.length < 3) {
+      throw new Error('MultivariateAnomalyDetector.fit requires at least 3 samples with finite values for every feature');
+    }
+    const vectors = clean.map((s) => toVector(s, this.featureOrder));
     const { mu, cov } = computeMeanCov(vectors);
+    // Per-feature variance floor (0.1% of the feature's magnitude, squared): a
+    // sensor that was constant during the fit window would otherwise get a
+    // ~1e6 inverse weight and make any tiny deviation score astronomically high.
+    for (let i = 0; i < cov.length; i++) {
+      const floor = (0.001 * Math.max(Math.abs(mu[i]), 1)) ** 2;
+      if (cov[i][i] < floor) cov[i][i] = floor;
+    }
+    let covInv = invertMatrix(cov);
+    if (!covInv.every((row) => row.every(Number.isFinite))) {
+      // singular beyond the ridge's ability to fix: fall back to independent features
+      covInv = cov.map((row, i) => row.map((_, j) => (i === j ? 1 / (cov[i][i] || 1) : 0)));
+    }
     this.mu = mu;
-    this.covInv = invertMatrix(cov);
+    this.covInv = covInv;
     this.fitted = true;
-    this.sampleCount = healthySamples.length;
+    this.sampleCount = clean.length;
     return this;
   }
 
@@ -77,8 +107,10 @@ class MultivariateAnomalyDetector {
   // to keep this cheap — call fit() again periodically for a full update.
   adapt(sample, rate = 0.01) {
     if (!this.fitted) return;
-    const v = toVector(sample, this.featureOrder);
-    for (let i = 0; i < this.mu.length; i++) this.mu[i] += (v[i] - this.mu[i]) * rate;
+    if (!Number.isFinite(rate) || rate <= 0) return;
+    const r = Math.min(rate, 1);
+    const v = toVector(sample, this.featureOrder, this.mu); // missing feature -> no shift
+    for (let i = 0; i < this.mu.length; i++) this.mu[i] += (v[i] - this.mu[i]) * r;
   }
 
   /**
@@ -87,15 +119,16 @@ class MultivariateAnomalyDetector {
    */
   score(sample) {
     if (!this.fitted) return { score: 0, contributions: this.featureOrder.map((f) => ({ feature: f, contribution: 0 })) };
-    const v = toVector(sample, this.featureOrder);
+    const v = toVector(sample, this.featureOrder, this.mu); // missing feature -> zero deviation
     const diff = v.map((x, i) => x - this.mu[i]);
     const weighted = matVecMul(this.covInv, diff); // S^-1 * diff
     // Per-feature contribution: diff_i * (S^-1 * diff)_i sums exactly to the
     // total squared Mahalanobis distance, giving an exact decomposition
     // rather than an approximation.
     const contributions = this.featureOrder.map((feature, i) => ({ feature, contribution: diff[i] * weighted[i] }));
-    const score = contributions.reduce((a, c) => a + c.contribution, 0);
-    return { score: Math.max(0, score), contributions };
+    const total = contributions.reduce((a, c) => a + c.contribution, 0);
+    const score = Number.isFinite(total) ? Math.min(MAX_SCORE, Math.max(0, total)) : 0;
+    return { score, contributions };
   }
 }
 

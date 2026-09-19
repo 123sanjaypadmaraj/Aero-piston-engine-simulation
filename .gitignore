@@ -1,4 +1,24 @@
+# dependencies
 node_modules/
 npm-debug.log*
+
+# secrets / local config
 .env
+.env.*
+!.env.example
+
+# runtime data (mission recordings, live-state cache)
 twin_core/data/
+data/
+
+# logs & reports
+logs/
+*.log
+coverage/
+.nyc_output/
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

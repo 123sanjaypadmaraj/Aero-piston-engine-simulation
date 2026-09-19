@@ -11,7 +11,7 @@
 
 'use strict';
 
-const { mean, std, slope, clamp } = require('./mathUtils');
+const { mean, std, slope, clamp, finiteOnly } = require('./mathUtils');
 
 const MAX_RUL_HOURS = 900;
 
@@ -21,8 +21,8 @@ const MAX_RUL_HOURS = 900;
  * @returns {Object} feature bag consumed by estimateRUL
  */
 function deriveRulFeatures(healthScoreHistory, anomalyScoreHistory) {
-  const h = healthScoreHistory.slice(-30);
-  const a = anomalyScoreHistory.slice(-30);
+  const h = finiteOnly(healthScoreHistory).slice(-30);
+  const a = finiteOnly(anomalyScoreHistory).slice(-30);
   return {
     currentHealth: h.length ? h[h.length - 1] : 100,
     healthMean: mean(h),
@@ -40,14 +40,16 @@ function deriveRulFeatures(healthScoreHistory, anomalyScoreHistory) {
  * @returns {{ rul: number, confidenceLow: number, confidenceHigh: number }}
  */
 function estimateRUL(features) {
-  const {
-    currentHealth = 100,
-    healthSlope = 0,
-    anomalyMean = 0,
-    anomalySlope = 0,
-    healthStd = 0,
-    sampleCount = 0,
-  } = features || {};
+  const f = features || {};
+  // Any missing/NaN/Infinity feature falls back to its neutral default, so the
+  // output is always a finite, non-negative hour count within [0, MAX_RUL_HOURS].
+  const num = (v, dflt) => (typeof v === 'number' && Number.isFinite(v) ? v : dflt);
+  const currentHealth = clamp(num(f.currentHealth, 100), 0, 100);
+  const healthSlope = num(f.healthSlope, 0);
+  const anomalyMean = num(f.anomalyMean, 0);
+  const anomalySlope = num(f.anomalySlope, 0);
+  const healthStd = Math.max(0, num(f.healthStd, 0));
+  const sampleCount = Math.max(0, num(f.sampleCount, 0));
 
   // Baseline: a fully healthy engine (score 100) sits near the top of the
   // simulated RUL range; baseline shrinks roughly linearly with health.

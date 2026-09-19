@@ -1,12 +1,25 @@
 /**
  * analysisEngine.js
  * -----------------------------------------------------------------------
- * Orchestrates the RAG + Gemini "AI Engine Situation" narrative:
+ * Orchestrates the RAG + LLM "AI Engine Situation" narrative:
  *
  *   telemetry tick -> retriever picks relevant knowledge docs
  *                  -> prompt built from docs + live sensor readings
- *                  -> Gemini generates a plain-language explanation
+ *                  -> an LLM provider (Gemini, falling back to Groq; see
+ *                     providers.js) generates a plain-language explanation
  *                  -> cached per engine + broadcast over Socket.IO
+ *
+ * Every stored/emitted analysis has this shape:
+ *   { text, model, provider, fallbackUsed, degraded, generatedAt,
+ *     severityKey, sources, error, cooldownUntil, fallbackReason }
+ *   provider      'gemini' | 'groq' | null (null = static rule-based text)
+ *   fallbackUsed  true when a non-primary provider answered (primary = the
+ *                 first configured provider that has a key)
+ *   degraded      true when `text` is the static non-AI fallback
+ *   error         why AI text is unavailable (only when degraded), else null
+ *   cooldownUntil ms epoch when the soonest provider cooldown ends, or null
+ *   fallbackReason why the primary provider was skipped/failed (only when
+ *                 fallbackUsed), else null
  *
  * Throttling: calling an LLM on every 2s telemetry tick for every engine
  * would be wasteful and rate-limit-prone, so an engine is only
@@ -15,62 +28,62 @@
  * AI_ANALYSIS_INTERVAL_MS has elapsed since its last analysis —
  * whichever comes first. A manual `refresh()` (wired to the dashboard's
  * "Explain now" button / POST /api/ai-analysis/:id/refresh) bypasses the
- * interval for an on-demand explanation.
+ * interval for an on-demand explanation. A degraded engine is retried as
+ * soon as the blocking provider cooldown ends (or after
+ * AI_DEGRADED_RETRY_MS, default 60s, for other failures).
  *
- * Fails soft: if GEMINI_API_KEY is missing or the API call errors/times
- * out, a rule-based fallback sentence is cached instead so the dashboard
- * always has *something* to show, and the tick loop is never blocked or
- * crashed by an AI failure.
+ * Fails soft: if no provider is configured, all are cooling down, or a
+ * call errors/times out, a rule-based fallback sentence is cached instead
+ * so the dashboard always has *something* to show, and the tick loop is
+ * never blocked or crashed by an AI failure. Provider selection, circuit
+ * breaking and per-provider request spacing live in providers.js.
  * -----------------------------------------------------------------------
  */
 
 'use strict';
 
 const { retrieveContext } = require('./retriever');
-const { callGemini } = require('./geminiClient');
+const { ProviderPool } = require('./providers');
+const { redactSecrets, readNonNegInt, truncate } = require('./aiUtil');
 
-// How often a *nominal, unchanged* engine gets re-analyzed just to keep the
-// narrative fresh. Kept fairly long by default because free-tier Gemini
-// keys/models can carry surprisingly small daily request quotas (as low as
-// ~20/day for some preview models) on top of any per-minute limit — a
-// short interval here times 3 engines burns that budget in minutes. A real
-// condition change (fault starts/resolves, a sensor crosses into
-// warning/critical) always triggers an immediate re-analysis regardless of
-// this interval, so responsiveness to genuine events isn't affected.
-const MIN_INTERVAL_MS = Number(process.env.AI_ANALYSIS_INTERVAL_MS) || 5 * 60 * 1000;
-
-// Guards against bursts hitting a per-minute cap: with 3 engines potentially
-// all "due" on the same tick, firing them concurrently would spend that
-// budget in one shot. Every Gemini call — across all engines — is funneled
-// through one queue that enforces a minimum gap between calls, so the fleet
-// degrades to "analyses arrive a bit more slowly" rather than "most calls 429".
-const GLOBAL_MIN_GAP_MS = Number(process.env.GEMINI_MIN_GAP_MS) || 13000;
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const MAX_TRACKED_ENGINES = 256; // bound on the analysis cache (fleet is tiny; this is a guard)
+const MAX_DOC_CHARS = 1200;
+const MAX_ALERT_CHARS = 200;
+const MAX_ALERTS = 5;
 
 /** Key that changes whenever the engine's overall condition changes materially. */
 function severityKey(engineSnapshot) {
-  const statuses = Object.values(engineSnapshot.statuses || {});
+  const statuses = Object.values((engineSnapshot && engineSnapshot.statuses) || {});
   const worst = statuses.includes('critical') ? 'critical' : statuses.includes('warning') ? 'warning' : 'nominal';
-  return `${worst}|${engineSnapshot.activeFault?.type || ''}|${engineSnapshot.predictedFault?.type || ''}`;
+  return `${worst}|${engineSnapshot?.activeFault?.type || ''}|${engineSnapshot?.predictedFault?.type || ''}`;
 }
 
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const fmt = (v, suffix = '') => (isNum(v) ? `${v}${suffix}` : 'unknown');
+
 function buildPrompt(engineSnapshot, fleetSnapshot, contextDocs) {
-  const knowledge = contextDocs.map((doc) => `- ${doc.title}: ${doc.text}`).join('\n');
+  const engine = engineSnapshot || {};
+  const fleet = (fleetSnapshot && fleetSnapshot.fleet) || {};
+  const docs = Array.isArray(contextDocs) ? contextDocs : [];
+  const knowledge = docs.length
+    ? docs.map((doc) => `- ${doc.title}: ${truncate(doc.text, MAX_DOC_CHARS)}`).join('\n')
+    : '- (no specific domain notes matched; rely on the telemetry below)';
 
   const telemetry = {
-    tail: engineSnapshot.tail,
-    engine: engineSnapshot.engine,
-    time: engineSnapshot.time,
-    readings: engineSnapshot.readings,
-    statuses: engineSnapshot.statuses,
-    health: engineSnapshot.health,
-    remainingUsefulLifeHours: engineSnapshot.rul,
-    activeFault: engineSnapshot.activeFault,
-    predictedFault: engineSnapshot.predictedFault,
-    recentAlerts: (engineSnapshot.alerts || []).slice(0, 5).map((a) => a.message),
-    altitudeMeters: engineSnapshot.altitude,
-    airspeedKmh: engineSnapshot.airspeed,
-    hoursFlown: engineSnapshot.hoursFlown,
+    tail: engine.tail,
+    engine: engine.engine,
+    time: engine.time,
+    readings: engine.readings,
+    statuses: engine.statuses,
+    health: isNum(engine.health) ? engine.health : null,
+    remainingUsefulLifeHours: isNum(engine.rul) ? engine.rul : null,
+    activeFault: engine.activeFault,
+    predictedFault: engine.predictedFault,
+    recentAlerts: (Array.isArray(engine.alerts) ? engine.alerts : []).slice(0, MAX_ALERTS)
+      .map((a) => truncate(a && a.message, MAX_ALERT_CHARS)),
+    altitudeMeters: engine.altitude,
+    airspeedKmh: engine.airspeed,
+    hoursFlown: engine.hoursFlown,
   };
 
   return `You are an aircraft maintenance engineer's assistant embedded in a UAV piston-engine digital twin dashboard.
@@ -82,7 +95,7 @@ ${knowledge}
 Live telemetry snapshot (JSON):
 ${JSON.stringify(telemetry, null, 2)}
 
-Fleet context: mission reliability ${fleetSnapshot.fleet.missionReliability}%, ${fleetSnapshot.fleet.criticalCount} of ${fleetSnapshot.fleet.engineCount} fleet engine(s) currently critical.
+Fleet context: mission reliability ${fmt(fleet.missionReliability, '%')}, ${fmt(fleet.criticalCount)} of ${fmt(fleet.engineCount)} fleet engine(s) currently critical.
 
 Write a short analysis (max ~60 words, 2-3 sentences, plain prose, no markdown headers or bullet lists) that:
 1. States the engine's overall condition in one clear sentence (nominal / degraded / critical).
@@ -92,36 +105,53 @@ Do not repeat these instructions, do not mention "AI" or "prompt" — just give 
 }
 
 function fallbackText(engineSnapshot, reason) {
-  const offNominal = Object.entries(engineSnapshot.statuses || {}).filter(([, status]) => status !== 'nominal');
+  const engine = engineSnapshot || {};
+  const name = engine.tail || engine.id || 'Engine';
+  const offNominal = Object.entries(engine.statuses || {}).filter(([, status]) => status !== 'nominal');
+  const health = isNum(engine.health) ? `health ${engine.health}%` : 'health unknown';
   const headline = offNominal.length === 0
-    ? `${engineSnapshot.tail}: all monitored parameters nominal, health ${engineSnapshot.health}%.`
-    : `${engineSnapshot.tail}: health ${engineSnapshot.health}%, attention needed on ${offNominal.map(([key]) => key).join(', ')}.`;
+    ? `${name}: all monitored parameters nominal, ${health}.`
+    : `${name}: ${health}, attention needed on ${offNominal.map(([key]) => key).join(', ')}.`;
   return `${headline} (AI narrative unavailable: ${reason})`;
 }
 
 class AiAnalysisEngine {
-  constructor({ io } = {}) {
+  /**
+   * @param {object}   [opts]
+   * @param {object}   [opts.io]      Socket.IO server (for the 'ai-analysis' emit)
+   * @param {Function} [opts.now]     clock (ms epoch), injectable for tests
+   * @param {object}   [opts.pool]    ProviderPool instance (default: built from env)
+   * @param {object}   [opts.env]     env source for the default pool/intervals
+   * @param {object}   [opts.config]  ProviderPool config overrides (see providers.js)
+   * @param {Function} [opts.sleep]   sleep override for the default pool
+   * @param {object}   [opts.logger]  { warn, log }
+   */
+  constructor({
+    io, now = Date.now, pool, env = process.env, config, sleep, logger = console,
+  } = {}) {
     this.io = io;
-    this.byEngine = new Map(); // engineId -> { text, model, generatedAt, severityKey, sources, error }
-    this._inFlight = new Set();
-    this._queue = Promise.resolve(); // serializes + spaces out Gemini calls across all engines
-    this._lastCallAt = 0;
+    this._now = now;
+    this._logger = logger;
+    this._closed = false;
+    this.pool = pool || new ProviderPool({ env, config, now, sleep, logger });
+    this.byEngine = new Map(); // engineId -> analysis object (see header)
+    this._inFlight = new Map(); // engineId -> Promise of the running analysis
+    this._retryAt = new Map(); // engineId -> ms epoch after which a degraded result is retried
+    // How often a *nominal, unchanged* engine gets re-analyzed just to keep
+    // the narrative fresh. Kept fairly long by default because free-tier
+    // keys/models can carry surprisingly small daily request quotas (as low
+    // as ~20/day for some preview models) on top of any per-minute limit — a
+    // short interval times 3 engines burns that budget in minutes. A real
+    // condition change (fault starts/resolves, a sensor crosses into
+    // warning/critical) always triggers an immediate re-analysis regardless
+    // of this interval, so responsiveness to genuine events isn't affected.
+    this.minIntervalMs = readNonNegInt(env.AI_ANALYSIS_INTERVAL_MS, 5 * 60 * 1000) || 5 * 60 * 1000;
+    this.degradedRetryMs = readNonNegInt(env.AI_DEGRADED_RETRY_MS, 60 * 1000) || 60 * 1000;
   }
 
-  /** Run one Gemini call, queued behind any others so calls are spaced at least GLOBAL_MIN_GAP_MS apart. */
-  async _rateLimitedCall(prompt) {
-    const previous = this._queue.catch(() => {}); // a prior failure must not jam the queue
-    let releaseTurn;
-    this._queue = previous.then(() => new Promise((resolve) => { releaseTurn = resolve; }));
-    await previous;
-    const wait = GLOBAL_MIN_GAP_MS - (Date.now() - this._lastCallAt);
-    if (wait > 0) await sleep(wait);
-    this._lastCallAt = Date.now();
-    try {
-      return await callGemini(prompt);
-    } finally {
-      releaseTurn();
-    }
+  /** Per-provider configuration/cooldown state (no secrets), e.g. for a health endpoint. */
+  providerStatus() {
+    return this.pool.status();
   }
 
   /** Latest cached analysis for one engine, or null if none yet. */
@@ -134,15 +164,22 @@ class AiAnalysisEngine {
     return Object.fromEntries(this.byEngine.entries());
   }
 
+  _isDue(cached, engineId, sevKey) {
+    if (!cached || cached.severityKey !== sevKey) return true;
+    const retryAt = this._retryAt.get(engineId);
+    if (cached.degraded && retryAt !== undefined) return this._now() >= retryAt;
+    return this._now() - cached.generatedAt > this.minIntervalMs;
+  }
+
   /** Called once per telemetry tick; fires (throttled) analyses in the background. */
   onFleetTick(fleetSnapshot) {
+    if (this._closed || !fleetSnapshot || !Array.isArray(fleetSnapshot.engines)) return;
     for (const engine of fleetSnapshot.engines) {
-      const cached = this.byEngine.get(engine.id);
+      if (!engine || !engine.id) continue;
       const sevKey = severityKey(engine);
-      const dueForRefresh = !cached
-        || cached.severityKey !== sevKey
-        || Date.now() - cached.generatedAt > MIN_INTERVAL_MS;
-      if (dueForRefresh) this._analyze(engine, fleetSnapshot, sevKey);
+      if (this._isDue(this.byEngine.get(engine.id), engine.id, sevKey)) {
+        this._analyze(engine, fleetSnapshot, sevKey).catch(() => {}); // _analyze never rejects; belt and braces
+      }
     }
   }
 
@@ -151,42 +188,91 @@ class AiAnalysisEngine {
     return this._analyze(engine, fleetSnapshot, severityKey(engine), true);
   }
 
-  async _analyze(engine, fleetSnapshot, sevKey, force = false) {
-    if (this._inFlight.has(engine.id) && !force) return this.byEngine.get(engine.id);
-    this._inFlight.add(engine.id);
+  _analyze(engine, fleetSnapshot, sevKey, force = false) {
+    const id = engine && engine.id;
+    const running = this._inFlight.get(id);
+    // A forced refresh joins the analysis already running for this engine instead of stacking another request.
+    if (running) return force ? running : Promise.resolve(this.byEngine.get(id) || null);
+    const job = this._run(engine, fleetSnapshot, sevKey).finally(() => this._inFlight.delete(id));
+    this._inFlight.set(id, job);
+    return job;
+  }
+
+  async _run(engine, fleetSnapshot, sevKey) {
+    const id = engine && engine.id;
+    let contextDocs = [];
     try {
-      const contextDocs = retrieveContext(engine);
+      contextDocs = retrieveContext(engine);
       const prompt = buildPrompt(engine, fleetSnapshot, contextDocs);
-      const { text, model } = await this._rateLimitedCall(prompt);
-      return this._store(engine.id, {
-        text,
-        model,
-        generatedAt: Date.now(),
+      const result = await this.pool.generate(prompt);
+      this._retryAt.delete(id);
+      return this._store(id, {
+        text: result.text,
+        model: result.model,
+        provider: result.provider,
+        fallbackUsed: result.fallbackUsed,
+        degraded: false,
+        generatedAt: this._now(),
         severityKey: sevKey,
         sources: contextDocs.map((d) => d.title),
         error: null,
+        cooldownUntil: result.cooldownUntil ?? null,
+        fallbackReason: result.fallbackReason ?? null,
       });
     } catch (err) {
-      const reason = err.code === 'NO_API_KEY' ? 'GEMINI_API_KEY is not set' : err.message;
-      if (err.code !== 'NO_API_KEY') console.warn(`[ai-analysis] ${engine.id}: ${reason}`);
-      return this._store(engine.id, {
+      if (err && err.code === 'CLOSED') return this.byEngine.get(id) || null; // shutting down: nothing to store or emit
+      const reason = redactSecrets(err && err.message ? err.message : 'unknown error');
+      // Only log when a real request was made; "no key" / "all cooling down" are expected states already logged once.
+      if (err && err.attempted !== false && err.code !== 'NO_PROVIDERS' && err.code !== 'ALL_COOLING_DOWN') {
+        this._log('warn', `${id}: ${reason}`);
+      }
+      const now = this._now();
+      const cooldownUntil = err && err.cooldownUntil ? err.cooldownUntil : null;
+      if (err && err.code === 'NO_PROVIDERS') this._retryAt.delete(id); // nothing to retry until the config changes
+      else this._retryAt.set(id, cooldownUntil || now + this.degradedRetryMs);
+      return this._store(id, {
         text: fallbackText(engine, reason),
         model: null,
-        generatedAt: Date.now(),
+        provider: null,
+        fallbackUsed: false,
+        degraded: true,
+        generatedAt: now,
         severityKey: sevKey,
         sources: [],
         error: reason,
+        cooldownUntil,
+        fallbackReason: null,
       });
-    } finally {
-      this._inFlight.delete(engine.id);
     }
   }
 
+  _log(level, message) {
+    try { (this._logger[level] || this._logger.log).call(this._logger, `[ai-analysis] ${redactSecrets(message)}`); } catch { /* never throw from logging */ }
+  }
+
   _store(engineId, result) {
+    if (this._closed) return result;
+    if (!this.byEngine.has(engineId) && this.byEngine.size >= MAX_TRACKED_ENGINES) {
+      const oldest = this.byEngine.keys().next().value; // Map iterates in insertion order
+      this.byEngine.delete(oldest);
+      this._retryAt.delete(oldest);
+    }
     this.byEngine.set(engineId, result);
-    this.io?.emit('ai-analysis', { engineId, ...result });
+    try {
+      this.io?.emit('ai-analysis', { engineId, ...result });
+    } catch (err) {
+      this._log('warn', `socket emit failed: ${err.message}`);
+    }
     return result;
+  }
+
+  /** Stop accepting work, cancel in-flight provider requests and sleeps. Safe to call more than once. */
+  close() {
+    this._closed = true;
+    this.pool.close();
   }
 }
 
-module.exports = { AiAnalysisEngine };
+module.exports = {
+  AiAnalysisEngine, buildPrompt, fallbackText, severityKey,
+};

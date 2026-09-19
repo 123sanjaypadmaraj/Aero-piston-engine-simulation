@@ -14,7 +14,7 @@
 
 'use strict';
 
-const { mean, std, slope, jerkiness, clamp } = require('./mathUtils');
+const { std, slope, jerkiness, clamp, finiteOnly } = require('./mathUtils');
 
 // Same nominal/warn/crit bands as simulator.js's SENSORS table, duplicated
 // here so this module has no hard dependency on the simulator's internals
@@ -46,8 +46,11 @@ const TREND_CATEGORY_MAP = {
   batteryVoltage: { falling: ['sensor_drift_failure'] },
 };
 
+// A non-finite reading compares false against every threshold, which would
+// silently read as "nominal" — report it as 'invalid' instead (fail-safe).
 function classify(key, value) {
   const def = SENSOR_DEFS[key];
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'invalid';
   if (value <= def.lowCrit || value >= def.highCrit) return 'critical';
   if (value <= def.lowWarn || value >= def.highWarn) return 'warning';
   return 'nominal';
@@ -93,8 +96,8 @@ function detectSensorFault(key, history) {
 // matching sustained trend — a smoothly rising EGT is overheating, a
 // jittery one (with rpm jittering in step) is a misfire signature.
 function detectMisfire(historyBySensor) {
-  const rpmHist = historyBySensor.rpm || [];
-  const egtHist = historyBySensor.egt || [];
+  const rpmHist = finiteOnly(historyBySensor.rpm);
+  const egtHist = finiteOnly(historyBySensor.egt);
   if (rpmHist.length < 10 || egtHist.length < 10) return null;
   const rpmJ = jerkiness(rpmHist.slice(-10));
   const rpmBaseline = std(rpmHist.slice(0, -10).length ? rpmHist.slice(0, -10) : rpmHist);
@@ -121,10 +124,20 @@ function computeHealthIndex(historyBySensor) {
   const flags = [];
   const trends = {};
 
+  if (!historyBySensor || typeof historyBySensor !== 'object') historyBySensor = {};
+
   for (const key of Object.keys(SENSOR_DEFS)) {
-    const hist = historyBySensor[key];
-    if (!hist || !hist.length) continue;
-    const value = hist[hist.length - 1];
+    const rawHist = historyBySensor[key];
+    if (!Array.isArray(rawHist) || !rawHist.length) continue;
+    const value = rawHist[rawHist.length - 1];
+    if (classify(key, value) === 'invalid') {
+      // Latest sample is NaN/Infinity/non-numeric: no trend or threshold maths is
+      // meaningful, so surface it as a sensor fault instead of scoring it nominal.
+      flags.push({ category: 'sensor_drift_failure', sensor: key, severity: 'warning', evidence: `${key} latest reading is invalid (${String(value)})` });
+      penalty += 9;
+      continue;
+    }
+    const hist = finiteOnly(rawHist); // drop any invalid samples earlier in the window
     const status = classify(key, value);
     if (status === 'critical') penalty += 22;
     else if (status === 'warning') penalty += 9;

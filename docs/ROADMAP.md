@@ -44,6 +44,10 @@ larger effort than the acquisition swap above:
   currently look identical downstream. A real system needs staleness
   detection and defined fail-safe behavior (e.g. flag as unknown/critical,
   not silently hold the last value).
+  *Partial, UI-level only:* the dashboard now shows a stale-telemetry
+  banner when the live feed stops arriving. That is a transport-level
+  indicator for the operator; per-sensor dropout/staleness detection and
+  fail-safe values in the models themselves are still not implemented.
 - **Offline model validation against real flight-test data.** Every model
   in `docs/MODEL_CARDS.md` is trained and evaluated exclusively on this
   project's own simulator output. Before any anomaly-detection or RUL
@@ -51,15 +55,27 @@ larger effort than the acquisition swap above:
   logged engine data with known ground-truth failures — which does not
   exist yet for this project.
 - **A safety case for AI-driven advisories.** Both the `analytics/`
-  predictions and the `ai/` Gemini narrative are advisory/explanatory, not
+  predictions and the `ai/` LLM narrative (Gemini/Groq) are advisory/explanatory, not
   actuating — that's the right posture for a prototype, but a fielded
   system needs an explicit, documented boundary for what an AI-derived
   advisory is allowed to influence (e.g. maintenance scheduling, yes;
   in-flight engine control, no) and what happens when the AI layer is
-  unavailable (the current fail-soft fallback in `ai/analysisEngine.js` is
-  a reasonable pattern to carry forward, but the *dashboard's* handling of
-  "this is a fallback, not a real analysis" would need to be much more
-  visually explicit than it is today for operational use).
+  unavailable (the current fail-soft chain — Gemini, then Groq, then a
+  rule-based sentence, with per-provider circuit breakers — is a reasonable
+  pattern to carry forward. The dashboard now labels the provider and marks
+  degraded/fallback text, but the "this is not a real analysis" handling would
+  still need much more rigor for operational use).
+
+## Service hardening vs. certification
+
+v1.1 hardened the *service* (config validation, rate limiting, optional API
+key, health/readiness probes, graceful shutdown, tests, CI, Docker; see
+`CHANGELOG.md`, `docs/DEPLOYMENT.md`, `docs/OPERATIONS.md`). That makes the
+demo easier to run reliably; it does not change the validation status of any
+model, and it is not a step toward certification by itself. Still open on the
+deployment side: horizontal scaling (state is in-process; see
+`docs/DEPLOYMENT.md`), authentication for the dashboard itself, and durable
+time-series storage for live telemetry.
 
 ## Staged plan
 

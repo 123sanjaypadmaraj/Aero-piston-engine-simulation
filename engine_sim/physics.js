@@ -30,6 +30,7 @@ const OIL_TEMP_TIME_CONST_S = 140; // oil circuit — slowest thermal lag
 const OIL_PRESSURE_TIME_CONST_S = 1.8; // pump responds quickly to RPM
 const BATTERY_TIME_CONST_S = 2.5;
 const VIBRATION_TIME_CONST_S = 1.0;
+const MAX_DT_S = 600; // longest single integration step accepted
 
 function lag(current, target, dt, timeConstS) {
   const alpha = 1 - Math.exp(-dt / timeConstS);
@@ -82,12 +83,16 @@ function initialState(env) {
  * afterwards.
  */
 function step(prevState, controls, env, dt) {
-  const throttle = Math.max(0, Math.min(1, controls.throttle));
+  // A NaN/negative dt or throttle would poison every lagged state forever
+  // (each value feeds the next tick), so sanitize at the boundary.
+  dt = Number.isFinite(dt) ? Math.max(0, Math.min(MAX_DT_S, dt)) : 0;
+  const rawThrottle = controls && Number.isFinite(controls.throttle) ? controls.throttle : 0;
+  const throttle = Math.max(0, Math.min(1, rawThrottle));
 
   const mapTarget = manifoldPressureTarget(throttle, env.pressureKPa);
   const manifoldPressureKPa = lag(prevState.manifoldPressureKPa, mapTarget, dt, MAP_TIME_CONST_S);
 
-  const rpmTgt = rpmTarget(throttle, env.densityRatio) * env.powerFactor;
+  const rpmTgt = rpmTarget(throttle, env.densityRatio);
   const rpm = lag(prevState.rpm, Math.max(IDLE_RPM * 0.9, rpmTgt), dt, RPM_TIME_CONST_S);
 
   const heat = heatRelease(manifoldPressureKPa, rpm, env.pressureKPa);
@@ -115,7 +120,7 @@ function step(prevState, controls, env, dt) {
   const alternatorTarget = rpm > IDLE_RPM * 1.15 ? 14.1 : 12.4 + 1.2 * (rpm / (IDLE_RPM * 1.15));
   const batteryVoltage = lag(prevState.batteryVoltage, alternatorTarget, dt, BATTERY_TIME_CONST_S);
 
-  return {
+  const next = {
     rpm,
     manifoldPressureKPa,
     cht,
@@ -127,6 +132,11 @@ function step(prevState, controls, env, dt) {
     batteryVoltage,
     heat,
   };
+  // Last line of defense: never let a non-finite value into the state chain.
+  for (const k of Object.keys(next)) {
+    if (!Number.isFinite(next[k])) next[k] = Number.isFinite(prevState[k]) ? prevState[k] : 0;
+  }
+  return next;
 }
 
 module.exports = {

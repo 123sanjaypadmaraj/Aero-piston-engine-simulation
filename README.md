@@ -22,46 +22,129 @@ engine health, predicted faults, and mission reliability on a live dashboard.
   0–100 health score, a remaining-useful-life estimate, and a predicted
   fault type/confidence *before* thresholds are fully crossed — no external
   ML runtime required, so the whole stack runs with just Node.js.
-- **Frontend (`public/`)** — a live dashboard (vanilla HTML/CSS/JS +
-  Chart.js) showing fleet-wide mission reliability, per-engine health rings,
+- **Frontend (`public/`)** — a live dashboard (vanilla HTML/CSS/JS with
+  self-hosted canvas charts) showing fleet-wide mission reliability, per-engine health rings,
   a sensor grid with live status coloring, trend charts, and a fault
   prediction / alert feed — styled in an SIH-inspired navy/saffron/tricolor
   theme.
 
+- **3D digital twin (`public/js/twin3d.js`)** — a procedural
+  horizontally-opposed six-cylinder engine (modelled on
+  `public/img/engine-photo.png`) rendered with three.js and driven by the same
+  live telemetry: crank/prop speed follows RPM (shown in slow motion), cylinder
+  heads and headers glow with CHT/EGT, the whole engine shakes with vibration,
+  air/fuel/exhaust/oil particles flow at rates tied to their sensors, and every
+  component glows nominal/warning/critical from the backend status. Pistons
+  and connecting rods use real slider-crank kinematics on a phased boxer
+  crank. Controls: orbit/zoom, camera presets, X-ray (see pistons, rods,
+  crank and per-cylinder firing flashes), explode, flow layers, click any
+  component for its reading, trend and what the sensor means. three.js is
+  served from `node_modules` (`/vendor/three`), so it works offline.
+
 - **AI Engine Situation report (`ai/`)** — a lightweight retrieval-augmented
   generation (RAG) layer that turns each engine's live telemetry into a
-  plain-language explanation using the **Gemini API**: a small hand-curated
+  plain-language explanation using an LLM (**Gemini**, with automatic **Groq** fallback): a small hand-curated
   knowledge base of engine/fault domain facts (`ai/knowledgeBase.js`) is
   retrieved by tag-matching against the engine's current active/predicted
   fault and any out-of-band sensors (`ai/retriever.js`), then grounded into
-  a prompt sent to Gemini (`ai/geminiClient.js`), orchestrated with caching,
-  event-driven + interval-based refresh, and graceful fallback
-  (`ai/analysisEngine.js`). See **AI Engine Situation Analysis** below.
+  a prompt sent to the provider pool (`ai/providers.js`, `ai/geminiClient.js`,
+  `ai/groqClient.js`), orchestrated with caching, event-driven + interval-based
+  refresh, and graceful fallback (`ai/analysisEngine.js`). See **AI Engine Situation Analysis** below.
 
-## Running it
+## Quick start
+
+Requires **Node.js >= 20** (developed on Node 24).
 
 ```bash
 npm install
-npm start
+cp .env.example .env     # optional - every variable has a default
+npm start                # launches server.js and opens the dashboard
 ```
 
-Then open **http://localhost:5000**.
+Then open **http://localhost:5000**. `npm start` runs `start.js` (installs
+dependencies if missing, starts the server, opens a browser). For servers,
+containers and process managers run `node server.js` directly, or `npm run dev`
+for auto-restart on file changes.
 
-- REST snapshot: `GET /api/snapshot`
-- Alert history: `GET /api/alerts`
-- Sensor/fault metadata: `GET /api/meta`
-- Per-engine time series: `GET /api/series/:engineId` (e.g. `uav-01`)
-- Live stream: Socket.IO `snapshot` event, emitted every 2s
-- AI situation report, all engines: `GET /api/ai-analysis`
-- AI situation report, one engine: `GET /api/ai-analysis/:engineId`
-- Force a fresh AI analysis now: `POST /api/ai-analysis/:engineId/refresh`
-- Live stream: Socket.IO `ai-analysis` event, emitted whenever a fresh analysis completes
+The dashboard's charts (`public/js/charts.js`), three.js and the Socket.IO
+client are served locally; only the Inter web font is fetched from Google Fonts
+(the page falls back to system fonts without it).
 
-Every engine object in `/api/snapshot` also carries an `analytics` field —
+### Configuration
+
+All configuration is via environment variables (`.env` is loaded
+automatically). **Every variable is optional**; `.env.example` is the fully
+commented reference. Invalid values make the server fail fast at startup with
+a message listing every problem.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `NODE_ENV` | `development` | `production` => CORS same-origin by default, no error detail in API responses, HSTS header |
+| `PORT` / `HOST` | `5000` / `0.0.0.0` | Listen port / bind address |
+| `CORS_ORIGIN` | unset | Comma-separated origin allowlist. Unset = open in dev, same-origin in production; `*` = open |
+| `TRUST_PROXY` | unset | `true`, hop count (`1`) or subnet list; set when behind a reverse proxy |
+| `LOG_LEVEL` | `info` | `silent` | `error` | `warn` | `info` | `debug` |
+| `SHUTDOWN_TIMEOUT_MS` | `10000` | Max time to drain connections on SIGTERM/SIGINT |
+| `TICK_MS` | `2000` | Live telemetry tick interval |
+| `ADMIN_API_KEY` | unset | If set (>= 8 chars), mutating `POST` routes require an `x-api-key` header |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window |
+| `RATE_LIMIT_MAX` | `120` | Requests per IP per window on `/api/*` |
+| `RATE_LIMIT_HEAVY_MAX` | `10` | Per-window cap on expensive routes (mission run, replay, AI refresh) |
+| `SOCKET_MAX_PER_IP` / `SOCKET_MAX_TOTAL` | `20` / `500` | Socket.IO connection caps |
+| `MAX_CONCURRENT_MISSIONS` | `2` | Simultaneous `engine-sim/run` executions (extra requests get 429) |
+| `GEMINI_API_KEY` | unset | Gemini key (primary AI provider) |
+| `GEMINI_MODEL` | see `.env.example` | Gemini model name |
+| `GEMINI_MIN_GAP_MS` | `13000` | Min gap between Gemini calls, fleet-wide |
+| `GROQ_API_KEY` | unset | Groq key (fallback AI provider) |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model name |
+| `GROQ_MIN_GAP_MS` | `2000` | Min gap between Groq calls |
+| `AI_PROVIDER_ORDER` | `gemini,groq` | Provider preference order |
+| `AI_PROVIDER_COOLDOWN_MS` | `300000` | How long a provider is skipped after a quota/rate-limit failure |
+| `AI_ANALYSIS_INTERVAL_MS` | `300000` | Min interval between automatic re-analyses of an unchanged engine |
+| `TWIN_DATA_DIR` | `./twin_core/data` | Where mission recordings are stored (`/data` in Docker) |
+| `TWIN_MAX_MISSIONS_PER_ENGINE` | `50` | Retention: oldest recordings beyond this are pruned |
+| `TWIN_MAX_READINGS_PER_MISSION` | `50000` | Cap on readings stored per recording (further appends are dropped) |
+
+Neither AI key is required. Set at least one to get LLM-written situation
+reports; without any, the app runs in a degraded mode with rule-based summaries
+(see **AI provider fallback** below).
+
+### API
+
+Base URL `http://localhost:5000`. Errors are JSON: `{ "error": "...", "detail"?: "..." }`.
+
+| Method & path | Description |
+|---|---|
+| `GET /api/health` | Liveness probe: `{ ok, service, uptime }`. Never rate-limited. |
+| `GET /api/ready` | Readiness probe: `200 { ready: true, checks: { fleet, store } }`, or `503` while starting, shutting down, or if the data directory is not writable. Never rate-limited. |
+| `GET /api/snapshot` | Latest fleet snapshot (all engines, incl. `analytics` and `aiAnalysis`) |
+| `GET /api/alerts` | Recent alerts |
+| `GET /api/meta` | Sensor and fault metadata |
+| `GET /api/series/:engineId` | Per-engine time series (e.g. `uav-01`) |
+| `GET /api/ai-analysis` | AI situation reports, all engines |
+| `GET /api/ai-analysis/:engineId` | AI situation report, one engine |
+| `POST /api/ai-analysis/:engineId/refresh` | Force a fresh AI analysis now (*heavy*, admin key if configured) |
+| `GET /api/engine-sim/profiles` | Available mission profiles |
+| `POST /api/engine-sim/run` | Run and record a physics mission (*heavy*, admin key if configured) |
+| `GET /api/engine-sim/recordings/:engineId` | List recorded missions |
+| `GET /api/engine-sim/recordings/:engineId/:missionId` | Full recorded time series |
+| `POST /api/engine-sim/replay/:engineId/:missionId` | Start a replay (*heavy*, admin key if configured) |
+| `POST /api/engine-sim/replay/:engineId/control` | pause / resume / seek / speed / stop (admin key if configured) |
+
+Socket.IO events (server -> client): `snapshot` (every tick, and once on
+connect), `ai-analysis` (when a fresh analysis completes), `replay-frame`
+(during a replay).
+
+When `ADMIN_API_KEY` is set, every non-GET request under `/api` must send
+`x-api-key: <key>`; GET routes and the dashboard stay open. The bundled
+dashboard does not send this header, so its **Explain now** button will get
+`401` when a key is set - see `docs/DEPLOYMENT.md`.
+
+Every engine object in `/api/snapshot` also carries an `analytics` field -
 a second, independent health/anomaly/RUL model (see **Advanced analytics**
 below) computed alongside the original rolling z-score model.
 
-### Physics-based mission simulation & replay (`engine_sim/`, `twin_core/`, `replay/`)
+## Physics-based mission simulation & replay (`engine_sim/`, `twin_core/`, `replay/`)
 
 Separate from the always-on 3-UAV live feed above, `engine_sim/` implements
 a proper mean-value physics model (Wiebe-style combustion heat release,
@@ -72,9 +155,11 @@ on demand, persist every tick, and be replayed back later:
   (`climbCruiseDescent`, `highAltitudeLongEndurance`, `hotWeather`,
   `rapidThrottleTransients`)
 - Run a mission end-to-end (persists to `twin_core/data/`, returns a
-  summary): `POST /api/engine-sim/run`
+  summary; data directory is `TWIN_DATA_DIR`, and only the newest
+  `TWIN_MAX_MISSIONS_PER_ENGINE` recordings per engine are kept): `POST /api/engine-sim/run`
   `{ "engineId": "uav-01", "profileId": "hotWeather", "durationSeconds": 3600, "faultTypes": ["overheat"] }`
-  (`faultTypes` is optional — omit it to get a randomized 0-2 concurrent
+  (`durationSeconds` 10-14400, default 1800; `dtSeconds` 0.5-30, default 2;
+  `faultTypes` is optional — omit it to get a randomized 0-2 concurrent
   faults per run)
 - List recorded missions for an engine: `GET /api/engine-sim/recordings/:engineId`
 - Read a recorded mission's full time series: `GET /api/engine-sim/recordings/:engineId/:missionId`
@@ -87,7 +172,7 @@ on demand, persist every tick, and be replayed back later:
 The dashboard does not yet have UI for these — they're API/Socket.IO-only
 for now (see `docs/ROADMAP.md`).
 
-### Advanced analytics (`analytics/`)
+## Advanced analytics (`analytics/`)
 
 Layered on top of (not replacing) the original rolling z-score + threshold
 model, every engine's live tick also runs through `analytics/`:
@@ -101,63 +186,133 @@ model, every engine's live tick also runs through `analytics/`:
   jointly implausible
 - an RUL estimate with a confidence band, and an offline (no network call,
   runs every tick) explainability narrative — a free complement to the
-  Gemini-based situation report above
+  LLM-based situation report above
 
 See `docs/MODEL_CARDS.md` for what each model is/isn't validated against.
 
-## AI Engine Situation Analysis (RAG + Gemini)
+## AI Engine Situation Analysis (RAG + Gemini/Groq)
 
-Every engine gets a running plain-language "situation report" — e.g. *"RQ-M2
+Every engine gets a running plain-language "situation report" - e.g. *"RQ-M2
 Kestrel is showing early signs of oil pressure loss: pressure has dropped to
 38 psi against a 45 psi warning threshold while oil temperature climbs
 in step. Recommend reducing power and inspecting the oil system before the
-next flight."* — instead of just raw numbers.
+next flight."* - instead of just raw numbers. It is an explanatory, advisory
+layer over simulated data, not a validated diagnostic.
 
 **How it works** (`ai/` folder):
-1. `knowledgeBase.js` — a small set of hand-written domain notes: what each
+1. `knowledgeBase.js` - a small set of hand-written domain notes: what each
    of the four simulated fault types means/causes, what each sensor's
    nominal/danger side represents, and what health score / RUL / mission
    reliability mean.
-2. `retriever.js` — the "R" in RAG: given one engine's current snapshot, it
+2. `retriever.js` - the "R" in RAG: given one engine's current snapshot, it
    scores every knowledge doc by tag overlap with that engine's active
    fault, predicted fault, and any sensor currently in warning/critical, and
    returns the top few most relevant docs. (Simple tag matching, not
-   embeddings — the knowledge base is small and hand-tagged, so this stays
+   embeddings - the knowledge base is small and hand-tagged, so this stays
    accurate without a vector DB dependency.)
-3. `analysisEngine.js` — builds a prompt from those retrieved docs plus the
-   live telemetry JSON, calls Gemini, and caches the result per engine. It
-   also decides *when* to re-analyze: immediately whenever an engine's
-   condition changes (nominal → warning → critical, or a fault starts/
-   resolves), and otherwise on a longer timer (`AI_ANALYSIS_INTERVAL_MS`) so
-   a quiet, nominal engine isn't re-analyzed constantly. Every Gemini call is
-   queued through one global rate limiter (`GEMINI_MIN_GAP_MS`) so 3 engines
-   becoming "due" on the same tick don't burst the API at once.
-4. `geminiClient.js` — a thin wrapper over Gemini's REST `generateContent`
-   endpoint (uses Node's built-in `fetch`, no SDK dependency).
+3. `analysisEngine.js` - builds a prompt from those retrieved docs plus the
+   live telemetry JSON, asks the provider pool for text, and caches the result
+   per engine. It decides *when* to re-analyze: immediately whenever an
+   engine's condition changes (nominal -> warning -> critical, or a fault
+   starts/resolves), and otherwise on a longer timer
+   (`AI_ANALYSIS_INTERVAL_MS`) so a quiet, nominal engine isn't re-analyzed
+   constantly.
+4. `providers.js`, `geminiClient.js`, `groqClient.js` - thin wrappers over each
+   provider's REST API (Node's built-in `fetch`, no SDK) plus the resilience
+   layer described next.
 
 The result rides along on every `/api/snapshot` response and `snapshot`
 socket event as each engine's `aiAnalysis` field, and a fresh one is also
-pushed the moment it's ready via the `ai-analysis` socket event — the
+pushed the moment it is ready via the `ai-analysis` socket event. The
 dashboard's **AI Engine Situation Report** panel renders it live, with an
-**Explain now** button to force an immediate on-demand analysis for the
-selected engine.
+**Explain now** button to force an on-demand analysis for the selected engine.
 
-**Setup:**
-```bash
-cp .env.example .env
-# then edit .env and set GEMINI_API_KEY (get one at https://aistudio.google.com/apikey)
+### AI provider fallback
+
 ```
-If `GEMINI_API_KEY` is unset, or a Gemini call errors/times out/hits a rate
-limit, the feature fails **soft**: a rule-based one-line fallback summary is
-shown instead (clearly labeled, never a crash) — the rest of the dashboard
-is unaffected either way.
+request -> Gemini (primary, per AI_PROVIDER_ORDER)
+              | 429 / quota / auth error / timeout / empty or blocked reply
+              v
+           Groq (fallback)
+              | also unavailable
+              v
+           rule-based one-line summary (degraded)
+```
+
+- A provider with **no API key is skipped** silently - that is configuration,
+  not an error. The first keyed provider in `AI_PROVIDER_ORDER` is "primary".
+- **Circuit breaker per provider.** On a quota/rate-limit failure (429/402) the
+  provider enters a **cooldown** (the server's `Retry-After` / `retryDelay` hint
+  if given, else `AI_PROVIDER_COOLDOWN_MS`, default 5 minutes) during which no
+  request is sent to it, so an exhausted free-tier key is not hammered. Auth
+  or model-not-found errors trigger a longer (1 h) cooldown; repeated
+  timeouts/5xx cool down for 60 s. Cooldown start/end is logged once.
+- Requests to one provider are serialized with a minimum gap
+  (`GEMINI_MIN_GAP_MS` 13 s, `GROQ_MIN_GAP_MS` 2 s) to stay inside free-tier
+  RPM limits.
+- Each `aiAnalysis` object reports what happened: `provider` (`gemini`,
+  `groq`, or `null`), `fallbackUsed` (a non-primary provider answered),
+  `degraded` (text is the static rule-based fallback), `error`,
+  `cooldownUntil` and `fallbackReason`.
+- **What the dashboard shows:** the report panel labels which provider/model
+  produced the text. When Groq answered, it is marked as a fallback; when no
+  provider is available, the panel shows the rule-based summary marked as
+  degraded (not AI-generated). Degraded engines are retried as soon as the
+  blocking cooldown ends. The rest of the dashboard (telemetry, health,
+  alerts, 3D twin) is unaffected.
 
 **A note on quotas:** free-tier Gemini keys can carry surprisingly tight
-limits — some models are capped at only ~20 requests/**day**, not just per
-minute. `AI_ANALYSIS_INTERVAL_MS` and `GEMINI_MIN_GAP_MS` (see
-`.env.example`) default to conservative values for this reason; tighten
-them (or switch `GEMINI_MODEL`) once you know your key's actual limits at
-https://ai.google.dev/gemini-api/docs/rate-limits.
+limits - some models are capped at only ~20 requests/**day**, not just per
+minute. `AI_ANALYSIS_INTERVAL_MS` and `GEMINI_MIN_GAP_MS` default to
+conservative values for this reason; tighten them (or switch `GEMINI_MODEL`)
+once you know your key's actual limits at
+https://ai.google.dev/gemini-api/docs/rate-limits. Adding a Groq key gives a
+free second provider so a Gemini quota hit degrades gracefully instead of
+falling straight to rule-based text.
+
+## Testing and quality
+
+```bash
+npm test              # all suites (node:test) under tests/
+npm run test:server   # tests/server - HTTP API, security, lifecycle
+npm run test:ai       # tests/ai     - providers, circuit breaker, analysis engine
+npm run test:core     # tests/core   - simulator, physics, analytics, store, replay
+npm run lint          # eslint (flat config, eslint.config.js)
+npm run check         # lint + tests (what CI runs)
+```
+
+`npm test` uses `scripts/run-tests.js`, which passes an explicit file list to
+`node --test` so it behaves the same on Node 20 and Node 24. Tests need no
+network access and no API keys. CI (`.github/workflows/ci.yml`) runs lint,
+tests, `npm audit` and a Docker build on Node 20 and 24.
+
+## Docker
+
+```bash
+cp .env.example .env                 # add keys / ADMIN_API_KEY as desired
+docker compose up -d --build         # http://localhost:5000
+docker compose ps                    # STATUS shows (healthy) once /api/health passes
+docker compose logs -f twin
+```
+
+Or without compose:
+
+```bash
+docker build -t aero-engine-digital-twin .
+docker run -d --init --name twin -p 5000:5000 --env-file .env \
+  -v twin-data:/data --read-only --tmpfs /tmp aero-engine-digital-twin
+```
+
+The image is multi-stage, runs as the non-root `node` user with
+`NODE_ENV=production`, stores recordings in the `/data` volume
+(`TWIN_DATA_DIR=/data`) and has a `HEALTHCHECK` against `/api/health`. Secrets are
+never baked into the image (`.env` is excluded by `.dockerignore`). See
+`docs/DEPLOYMENT.md` (reverse proxy, TLS, backups, scaling) and
+`docs/OPERATIONS.md` (health checks, logs, troubleshooting).
+
+**Single instance only:** fleet state, alert history and replay sessions live in
+process memory and Socket.IO is not configured with a shared adapter, so run
+exactly one replica (see `docs/DEPLOYMENT.md`).
 
 ## Project structure
 
@@ -189,21 +344,44 @@ SIH/
 ├── ai/
 │   ├── knowledgeBase.js  # RAG corpus: fault/sensor/health domain knowledge
 │   ├── retriever.js      # RAG retrieval: picks relevant docs per engine snapshot
+│   ├── providers.js      # Provider pool: order, per-provider circuit breaker/cooldown, spacing
 │   ├── geminiClient.js   # Gemini generateContent REST wrapper
-│   └── analysisEngine.js # Orchestration: prompts, caching, throttling, fallback
+│   ├── groqClient.js     # Groq chat-completions REST wrapper (fallback)
+│   └── analysisEngine.js # Orchestration: prompts, caching, refresh policy, rule-based fallback
 ├── docs/                 # Architecture, fault taxonomy, model cards, deployment roadmap
-├── .env.example          # GEMINI_API_KEY and related config (copy to .env)
+├── config.js             # Validated env configuration (fails fast)
+├── middleware/           # Security (helmet/CORS/rate limits/admin key), logging, errors, validation
+├── tests/                # node:test suites: server/, ai/, core/
+├── scripts/run-tests.js  # Cross-version test runner
+├── Dockerfile, docker-compose.yml, .dockerignore
+├── .github/workflows/ci.yml
+├── .env.example          # Complete, commented environment reference (copy to .env)
 ├── package.json
 └── public/
     ├── index.html
     ├── css/style.css    # SIH theme (navy / saffron / tricolor accents)
-    └── js/app.js        # Dashboard rendering + Socket.IO client
+    └── js/
+        ├── app.js       # Dashboard rendering + Socket.IO client
+        ├── charts.js    # Self-hosted canvas line chart
+        └── twin3d.js    # three.js 3D engine twin (ES module)
 ```
 
 ## Notes
 
+- The 3D twin shows the engine's single CHT/EGT sensor values on every
+  cylinder — the telemetry has no per-cylinder channels, so it does not
+  invent any. Real per-cylinder data would slot in per `cylinders[]` entry.
 - All telemetry is **simulated** for demonstration — there is no real UAV or
   FADEC bus connection.
 - To swap in real sensor data later, replace `simulator.js`'s tick loop with
   an ingest layer reading the actual data bus; the REST API, socket
-  broadcast, and dashboard require no changes.
+  broadcast, and dashboard should need few changes (the data contract is
+  the per-engine snapshot shape).
+- **Prototype status.** This is a hackathon prototype for advisory/demo use.
+  None of its models (rolling z-score, Mahalanobis anomaly detection, RUL,
+  LLM narratives) has been validated against real engine data, and it is not
+  certified or intended as a safety-of-flight system. See `docs/MODEL_CARDS.md`
+  and `docs/ROADMAP.md`.
+- **Operating it.** See `docs/DEPLOYMENT.md` (Docker, reverse proxy, TLS,
+  backups, scaling) and `docs/OPERATIONS.md` (probes, logs, troubleshooting);
+  release notes are in `CHANGELOG.md`.

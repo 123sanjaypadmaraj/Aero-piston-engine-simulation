@@ -23,4 +23,12 @@ function getAll() {
   return Object.fromEntries(states);
 }
 
-module.exports = { set, get, getAll };
+function remove(engineId) {
+  return states.delete(engineId);
+}
+
+function clear() {
+  states.clear();
+}
+
+module.exports = { set, get, getAll, remove, clear };

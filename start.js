@@ -19,7 +19,8 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
-const PORT = process.env.PORT || 5000;
+// config.js also loads .env, so PORT set there is honoured by the launcher and server alike.
+const { port: PORT } = require('./config');
 const URL = `http://localhost:${PORT}`;
 
 function ensureDependencies() {

@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint & test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - name: Dependency audit (production, high+)
+        # Visible but non-blocking: an upstream advisory should not block unrelated PRs.
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
+
+  docker:
+    name: Docker build (no push)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: aero-engine-digital-twin:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test the image
+        run: |
+          docker run -d --name twin -p 5000:5000 aero-engine-digital-twin:ci
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:5000/api/health; then exit 0; fi
+            sleep 1
+          done
+          docker logs twin
+          exit 1
