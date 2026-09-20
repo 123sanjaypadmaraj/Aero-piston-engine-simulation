@@ -17,7 +17,7 @@
 
 'use strict';
 
-const { mean, invertMatrix, matVecMul } = require('./mathUtils');
+const { invertMatrix, matVecMul } = require('./mathUtils');
 
 const DEFAULT_FEATURE_ORDER = [
   'rpm', 'cht', 'egt', 'oilPressure', 'oilTemp', 'fuelFlow', 'vibration', 'manifoldPressure', 'batteryVoltage',

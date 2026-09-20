@@ -65,7 +65,7 @@ const FAULT_TYPES = {
   oilLoss: {
     label: 'Oil Pressure Loss',
     affects: ['oilPressure', 'oilTemp', 'vibration'],
-    drift: { oilPressure: -0.55, oilTemp: 0.3, vibration: 0.03 },
+    drift: { oilPressure: -2.4, oilTemp: 0.3, vibration: 0.03 },
   },
   vibration: {
     label: 'Mechanical Imbalance / Vibration Anomaly',

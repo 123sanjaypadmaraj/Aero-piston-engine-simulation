@@ -167,16 +167,18 @@ test('an overheat fault drives cht/egt up and health down; it resolves with an i
   let peakEgt = 0;
   let minHealth = 100;
   let last;
+  const seenAlerts = []; // the snapshot only carries the newest 8 alerts, so collect across ticks
   for (let i = 0; i < 45; i++) {
     last = fleet.step().engines[0];
+    seenAlerts.push(...last.alerts);
     peakEgt = Math.max(peakEgt, last.readings.egt);
     minHealth = Math.min(minHealth, last.health);
   }
   assert.ok(peakEgt > before.readings.egt + 40, `egt rose: ${before.readings.egt} -> ${peakEgt}`);
   assert.ok(minHealth < before.health, `health fell: ${before.health} -> ${minHealth}`);
   assert.equal(last.activeFault, null);
-  assert.ok(last.alerts.some((a) => a.severity === 'info' && /resolved/.test(a.message)));
-  assert.ok(last.alerts.some((a) => a.severity === 'critical' || a.severity === 'warning'));
+  assert.ok(seenAlerts.some((a) => a.severity === 'info' && /resolved/.test(a.message)));
+  assert.ok(seenAlerts.some((a) => a.severity === 'critical' || a.severity === 'warning'));
 });
 
 test('alert ids are unique even when several fire within the same millisecond', () => {

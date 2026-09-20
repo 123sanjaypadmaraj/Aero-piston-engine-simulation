@@ -714,9 +714,6 @@ function buildEngine(root) {
   xrayMats.push([barrelMat, 0.2], [finMat, 0.22], [headMat, 0.3]);
 
   const cylinders = [];
-  const exhaustPorts = [];
-  const intakePorts = [];
-  const bootEnds = [];
 
   STATION_X.forEach((sx, station) => {
     for (const side of [1, -1]) {

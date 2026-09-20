@@ -59,6 +59,12 @@ running the prototype reliably, safely and observably.
   can be tested; running it directly still starts the server.
 - Production defaults to same-origin CORS instead of allowing every origin.
 
+### Fixed
+- `oilLoss` simulated fault drifted too weakly to ever reach the critical
+  oil-pressure threshold (so it raised no alerts); drift strengthened.
+- Overheat-resolution test now collects alerts across ticks instead of relying
+  on the newest-8 snapshot window. Removed unused variables flagged by lint.
+
 ### Known limitations
 - Single-instance only: fleet state, AI cache and replay sessions are in-process
   memory and Socket.IO uses the in-memory adapter (see `docs/DEPLOYMENT.md`).
