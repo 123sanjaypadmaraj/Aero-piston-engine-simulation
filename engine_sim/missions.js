@@ -42,10 +42,10 @@ function rapidThrottleTransients(t) {
 }
 
 const MISSIONS = {
-  climbCruiseDescent: { name: 'Climb / Cruise / Descent', durationS: 3600, ambientTempOffsetC: 0, control: climbCruiseDescent },
-  highAltitudeLongEndurance: { name: 'High-Altitude Long Endurance', durationS: 7200, ambientTempOffsetC: 0, control: highAltitudeLongEndurance },
-  hotWeather: { name: 'Hot-Weather Ops', durationS: 3600, ambientTempOffsetC: 22, control: hotWeather },
-  rapidThrottleTransients: { name: 'Rapid Throttle Transients', durationS: 1800, ambientTempOffsetC: 0, control: rapidThrottleTransients },
+  climbCruiseDescent: { name: 'Climb / Cruise / Descent', durationS: 3600, ambientTempOffsetC: 0, ambientHumidityPct: 40, control: climbCruiseDescent },
+  highAltitudeLongEndurance: { name: 'High-Altitude Long Endurance', durationS: 7200, ambientTempOffsetC: 0, ambientHumidityPct: 15, control: highAltitudeLongEndurance },
+  hotWeather: { name: 'Hot-Weather Ops', durationS: 3600, ambientTempOffsetC: 22, ambientHumidityPct: 75, control: hotWeather },
+  rapidThrottleTransients: { name: 'Rapid Throttle Transients', durationS: 1800, ambientTempOffsetC: 0, ambientHumidityPct: 40, control: rapidThrottleTransients },
 };
 
 module.exports = { MISSIONS };

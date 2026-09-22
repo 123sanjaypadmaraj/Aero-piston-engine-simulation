@@ -21,6 +21,7 @@ const { invertMatrix, matVecMul } = require('./mathUtils');
 
 const DEFAULT_FEATURE_ORDER = [
   'rpm', 'cht', 'egt', 'oilPressure', 'oilTemp', 'fuelFlow', 'vibration', 'manifoldPressure', 'batteryVoltage',
+  'lambda', 'injectorPulseWidth', 'injectionTiming', 'alternatorCurrent',
 ];
 
 // A missing/non-finite feature becomes `fallback[i]` (the healthy mean when the

@@ -29,6 +29,10 @@ const SENSOR_DEFS = {
   vibration: { unit: 'mm/s', nominal: [0.4, 2.4], lowWarn: -Infinity, lowCrit: -Infinity, highWarn: 2.4, highCrit: 4.2 },
   manifoldPressure: { unit: 'kPa', nominal: [88, 106], lowWarn: 88, lowCrit: 78, highWarn: Infinity, highCrit: Infinity },
   batteryVoltage: { unit: 'V', nominal: [12.6, 14.6], lowWarn: 12.6, lowCrit: 11.8, highWarn: Infinity, highCrit: Infinity },
+  lambda: { unit: 'AFR', nominal: [13.2, 15.0], lowWarn: 12.6, lowCrit: 11.5, highWarn: 15.2, highCrit: 16.0 },
+  injectorPulseWidth: { unit: 'ms', nominal: [2.4, 4.4], lowWarn: -Infinity, lowCrit: -Infinity, highWarn: 4.4, highCrit: 5.2 },
+  injectionTiming: { unit: '°BTDC', nominal: [20, 30], lowWarn: 18, lowCrit: 15, highWarn: 30, highCrit: 34 },
+  alternatorCurrent: { unit: 'A', nominal: [6, 32], lowWarn: 6, lowCrit: 4, highWarn: Infinity, highCrit: Infinity },
 };
 
 // Which taxonomy categories a given sensor's *sustained trend* can imply,
@@ -42,8 +46,12 @@ const TREND_CATEGORY_MAP = {
   fuelFlow: { falling: ['injector_abnormality'] },
   manifoldPressure: { falling: ['injector_abnormality', 'combustion_instability'] },
   vibration: { rising: ['abnormal_vibration_pattern'] },
-  rpm: { rising: ['combustion_instability'], falling: ['combustion_instability'] },
+  rpm: { rising: ['combustion_instability'], falling: ['combustion_instability', 'misfire'] },
   batteryVoltage: { falling: ['sensor_drift_failure'] },
+  lambda: { rising: ['injector_abnormality'], falling: ['combustion_instability', 'injector_abnormality'] },
+  injectorPulseWidth: { rising: ['injector_abnormality'], falling: ['injector_abnormality'] },
+  injectionTiming: { rising: ['combustion_instability'], falling: ['combustion_instability', 'misfire'] },
+  alternatorCurrent: { falling: ['sensor_drift_failure'] },
 };
 
 // A non-finite reading compares false against every threshold, which would

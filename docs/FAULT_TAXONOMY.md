@@ -62,3 +62,42 @@ than resolving within one episode, (3) per-cylinder or per-cycle signals to
 support misfire and combustion-instability fault types, which requires
 extending the sensor model itself, not just adding a new entry to
 `FAULT_TYPES`.
+
+## Mission-replay fault library (`missionreplay/faultLib.js`)
+
+The spec-driven recorder has its own, larger fault taxonomy — deliberately
+separate from `simulator.js`'s 4-scenario set, because it models
+*time-windowed degradation events* on a labeled synthetic mission log rather
+than a probabilistic random-walk drift on the live fleet feed. Each class
+carries an injected-onset/detected/resolved timeline (with a
+`precursor_window_s`) and a severity multiplier:
+
+| Fault type | Class | Affected parameters (degradation) | Detection rule |
+|---|---|---|---|
+| `oil_pressure_degradation` | Lubrication | oil_pressure_kpa down × severity | oil_pressure_kpa < 350 for 10 consecutive samples |
+| `oil_starvation` | Lubrication (severe) | oil_pressure_kpa, oil_temp_c | oil_pressure_kpa < 250 for 3 consecutive samples |
+| `fuel_starvation` | Fuel system | fuel_flow_lph, rpm, manifold_pressure_kpa | fuel_flow_lph < 5 for 10 consecutive samples |
+| `detonation_risk` | Combustion instability | afr, egt_c | air_fuel_ratio > 15.5 (lean) for 8 consecutive samples |
+| `vibration_anomaly` | Vibration | vibration_mm_s, rpm, cht_c | vibration_mm_s > 6.0 for 5 consecutive samples |
+| `overheating` | Cooling/thermal | cht_c, egt_c, oil_temp_c | cht_c above phase target + 240 K for 3 consecutive samples |
+| `plug_fouling` | Misfire-adjacent | afr, rpm (rpm oscillation) | rpm-jerk threshold on consecutive-sample deltas |
+| `sensor_dropout` | **Sensor failure** | none — the *reported* value goes `OVERRANGE_SENSOR` (-32000) | reported value is NaN or exactly -32000 |
+
+Notes relative to the 8-category master-plan mapping above:
+
+- `sensor_dropout` closes the "Sensor drift / failure" row for the recorder —
+  it is the case where the *reported* value is invalid while the underlying
+  engine is fine, and it is the only fault that serialises as the
+  `OVERRANGE_SENSOR = -32000` sentinel rather than a physical degradation.
+- `overheating` / `plug_fouling` / `detonation_risk` give partial coverage to
+  the cooling-degradation, misfire and combustion-instability rows; they are
+  still single-episode windows, not the persistent cross-mission coking
+  state the future-work note above describes.
+- Detection rules deliberately guard against false positives during phase
+  ramps: CHT-style rules compare against the *current phase's* target plus
+  a margin, and the rpm-jerk rule requires a sustained consecutive-sample
+  streak, so a normal takeoff/climb transition does not trip them.
+- An event can be operator-injected (`injected: true`) or simply *emerge*
+  from the detection rules running over nominal-but-noisy data
+  (`injected: false`) — the emergent form is what makes the log useful as
+  labeled training data for `analytics/`.

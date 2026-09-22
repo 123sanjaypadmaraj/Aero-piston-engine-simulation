@@ -84,8 +84,10 @@ time-series storage for live telemetry.
 telemetry bus, `analytics/`+`ai/` produce health/fault/RUL/narrative
 output, `public/` displays it. Purpose: prove the end-to-end pipeline
 shape and demonstrate the UX, not to produce operationally trustworthy
-numbers. No CAN/MQTT (see `docs/ARCHITECTURE.md` for why), no real
-sensors, no real engine.
+numbers. The synthetic mission recorder carries its own in-process
+J1939-flavoured artificial CAN bus (`missionreplay/can.js`, `/api/can/status`)
+as a stepping stone; there is still **no real vcan/SocketCAN interface and
+no MQTT** (see `docs/ARCHITECTURE.md`), no real sensors, no real engine.
 
 **Stage 2 — hardware-in-the-loop.** Swap `simulator.js`'s generator for a
 real Rotax-class test-stand engine instrumented with real sensors (CHT/EGT

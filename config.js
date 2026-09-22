@@ -110,6 +110,10 @@ function build(env) {
     socketMaxPerIp: int('SOCKET_MAX_PER_IP', 20, 1, 100000),
     socketMaxTotal: int('SOCKET_MAX_TOTAL', 500, 1, 1000000),
     maxConcurrentMissions: int('MAX_CONCURRENT_MISSIONS', 2, 1, 1000),
+    // Persist the live fleet's rolling telemetry to twin_core/data/live
+    // (default on; that dir is git-ignored). The cap per engine is controlled
+    // by TWIN_LIVE_HISTORY_MAX_LINES and read by twin_core/liveHistoryStore.
+    liveHistoryEnabled: raw('TWIN_LIVE_HISTORY_ENABLED') !== 'false',
   };
 
   if (problems.length) throw new ConfigError(problems);

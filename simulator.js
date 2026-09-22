@@ -31,6 +31,9 @@ const {
   deriveRulFeatures,
   explain,
   recommend,
+  createFatigueState,
+  advanceFatigue,
+  fatigueReport,
 } = require('./analytics');
 const { createRng } = require('./engine_sim/rng');
 
@@ -54,6 +57,10 @@ const SENSORS = {
   vibration: { unit: 'mm/s', nominal: [0.4, 2.4], lowWarn: -Infinity, lowCrit: -Infinity, highWarn: 2.4, highCrit: 4.2, label: 'Vibration' },
   manifoldPressure: { unit: 'kPa', nominal: [88, 106], lowWarn: 88, lowCrit: 78, highWarn: Infinity, highCrit: Infinity, label: 'Manifold Pressure' },
   batteryVoltage: { unit: 'V', nominal: [12.6, 14.6], lowWarn: 12.6, lowCrit: 11.8, highWarn: Infinity, highCrit: Infinity, label: 'Battery Voltage' },
+  lambda: { unit: 'AFR', nominal: [13.2, 15.0], lowWarn: 12.6, lowCrit: 11.5, highWarn: 15.2, highCrit: 16.0, label: 'Air-Fuel Ratio (λ)' },
+  injectorPulseWidth: { unit: 'ms', nominal: [2.4, 4.4], lowWarn: -Infinity, lowCrit: -Infinity, highWarn: 4.4, highCrit: 5.2, label: 'Injector Pulse Width' },
+  injectionTiming: { unit: '°BTDC', nominal: [20, 30], lowWarn: 18, lowCrit: 15, highWarn: 30, highCrit: 34, label: 'Injection Timing' },
+  alternatorCurrent: { unit: 'A', nominal: [6, 32], lowWarn: 6, lowCrit: 4, highWarn: Infinity, highCrit: Infinity, label: 'Alternator Current' },
 };
 
 const FAULT_TYPES = {
@@ -71,11 +78,45 @@ const FAULT_TYPES = {
     label: 'Mechanical Imbalance / Vibration Anomaly',
     affects: ['vibration', 'rpm'],
     drift: { vibration: 0.16, rpm: -6 },
+    wobble: { vibration: 0.4, rpm: 18 },
   },
   fuelStarvation: {
     label: 'Fuel System Degradation',
     affects: ['fuelFlow', 'rpm', 'manifoldPressure'],
     drift: { fuelFlow: -0.22, rpm: -12, manifoldPressure: -0.6 },
+  },
+  // ---- Master-plan fault families that were previously missing: ----------
+  sensorDrift: {
+    label: 'Sensor Drift / Failure',
+    // The transducer drifts; the physical engine is untouched. batteryVoltage
+    // is not shared with any other fault, so this stays a clean single-signal
+    // (mis-)attribution rather than a correlated multi-sensor drift.
+    affects: ['batteryVoltage'],
+    bias: { batteryVoltage: -1.2 },
+    drift: { batteryVoltage: -0.2 },
+  },
+  coking: {
+    label: 'Cooling / Coking Degradation',
+    affects: ['cht', 'egt', 'oilTemp', 'manifoldPressure'],
+    drift: { cht: 1.1, egt: 1.2, oilTemp: 0.5, manifoldPressure: -1.8 },
+  },
+  injectorAbnormality: {
+    label: 'Injector Abnormality',
+    affects: ['lambda', 'injectorPulseWidth', 'fuelFlow', 'rpm'],
+    drift: { lambda: 0.6, injectorPulseWidth: 0.6, fuelFlow: 0.4, rpm: -28 },
+    wobble: { lambda: 0.15, injectorPulseWidth: 0.12 },
+  },
+  misfire: {
+    label: 'Misfire',
+    affects: ['rpm', 'egt', 'lambda'],
+    drift: { rpm: -25, egt: -14, lambda: -0.06 },
+    wobble: { rpm: 60, egt: 18, lambda: 0.2 },
+  },
+  combustionInstability: {
+    label: 'Combustion Instability',
+    affects: ['lambda', 'rpm', 'egt', 'manifoldPressure'],
+    drift: { lambda: 0.35, rpm: -25, egt: 10, manifoldPressure: 0.6 },
+    wobble: { lambda: 0.4, rpm: 25, egt: 16, manifoldPressure: 1.8 },
   },
 };
 
@@ -98,6 +139,10 @@ const PHYSICAL_RANGE = {
   vibration: [0, 50],
   manifoldPressure: [10, 150],
   batteryVoltage: [0, 32],
+  lambda: [8, 20],
+  injectorPulseWidth: [0, 12],
+  injectionTiming: [0, 60],
+  alternatorCurrent: [0, 120],
 };
 const SENSOR_FAULT_MODES = ['nan', 'outOfRange', 'dropout'];
 const STALE_AFTER_TICKS = 2; // consecutive missing samples before a sensor is flagged 'stale'
@@ -167,6 +212,9 @@ class EngineTwin {
     this.warmupSamples = [];
     this.healthScoreHistory = [];
     this.anomalyScoreHistory = [];
+    // Fatigue-RUL accumulator: deterministic per-tick Miner damage from the
+    // surrogate part stresses (materialDB). No randomness, ever.
+    this.fatigue = createFatigueState();
   }
 
   rand(a, b) { return a + this.rng() * (b - a); }
@@ -252,10 +300,16 @@ class EngineTwin {
     // apply active fault drift, scaled by how far into the fault we are
     if (this.activeFault) {
       const fault = FAULT_TYPES[this.activeFault.type];
-      const drift = fault.drift[key];
+      const drift = fault.drift && fault.drift[key];
       if (drift !== undefined) {
         const ramp = this.activeFault.severityRamp / 24;
         next += drift * span * 0.03 * (0.4 + ramp);
+      }
+      // oscillatory signatures (misfire, combustion instability, injector
+      // ripple) — a wobble is invisible to a plain trend check but shows up
+      // as elevated sample-to-sample jerkiness the jerkiness detector sees.
+      if (fault.wobble && fault.wobble[key] !== undefined) {
+        next += fault.wobble[key] * Math.sin(this.tick * 0.9);
       }
     }
 
@@ -319,8 +373,22 @@ class EngineTwin {
       let score = 0;
       for (const s of def.affects) {
         const status = classify(s, readings[s]);
-        score += status === 'critical' ? 3 : status === 'warning' ? 1.4 : 0;
-        score += Math.min(zscores[s] / 3, 1.5);
+        if (status === 'critical') score += 3;
+        else if (status === 'warning') score += 1.4;
+        const z = zscores[s];
+        // Credit a statistical displacement only when it is actually outside
+        // the sensor's own nominal scatter (|z| >= 1.2) AND moving the way
+        // this fault signature expects (drift/bias sign). A signature that
+        // merely *shares* sensors with another fault (e.g. overheat vs coking
+        // both touching CHT/EGT) is not outscored by a sensor that never moved.
+        if (Math.abs(z) >= 1.2) {
+          const drift = def.drift && def.drift[s];
+          const bias = def.bias && def.bias[s];
+          const expectFalling = drift !== undefined ? drift < 0 : (bias !== undefined ? bias < 0 : true);
+          const center = SENSORS[s] ? mid(SENSORS[s].nominal) : 0.5;
+          const falling = readings[s] < center;
+          if (expectFalling === falling) score += Math.min(Math.abs(z) / 3, 1.5);
+        }
       }
       if (score > bestScore) { bestScore = score; bestType = type; }
     }
@@ -395,8 +463,15 @@ class EngineTwin {
     const zscores = {};
     const validity = {};
     const statuses = {};
+    const activeBias = this.activeFault ? FAULT_TYPES[this.activeFault.type].bias : null;
+    const biasRamp = this.activeFault ? 0.6 + this.activeFault.severityRamp / 24 : 0;
     for (const key of Object.keys(SENSORS)) {
-      const truth = this.updateSensor(key);
+      let truth = this.updateSensor(key);
+      // Sensor-drift semantics: bias the acquired reading WITHOUT moving the
+      // engine's true state, so this is a transducer error, not a real fault.
+      if (activeBias && activeBias[key] !== undefined) {
+        truth = clamp(truth + activeBias[key] * biasRamp, PHYSICAL_RANGE[key][0], PHYSICAL_RANGE[key][1]);
+      }
       const acquired = this.acquire(key, truth);
       const v = acquired.value;
       readings[key] = v;
@@ -414,6 +489,10 @@ class EngineTwin {
     this.altitude = clamp(this.altitude + this.gauss() * 25, 2500, 7500);
     this.airspeed = clamp(this.airspeed + this.gauss() * 2.2, 90, 200);
     this.hoursFlown += 2 / 3600; // ~2s tick
+
+    // Fatigue-RUL: advance all part damage deterministically from this tick's
+    // readings, then fold the report into the analytics result below.
+    advanceFatigue(this.fatigue, readings, { dtSeconds: 2, hoursFlown: this.hoursFlown });
 
     const prediction = this.computeHealthAndPrediction(readings, zscores, statuses);
     this.healthScore = prediction.health;
@@ -475,6 +554,7 @@ class EngineTwin {
     const rul = estimateRUL(rulFeatures);
     const explanation = explain({ contributions: anomaly.contributions, flags: healthIndex.flags });
     const recommendation = recommend({ flags: healthIndex.flags, rul });
+    const fatigue = fatigueReport(this.fatigue, {});
 
     return {
       healthScore: healthIndex.healthScore,
@@ -483,6 +563,7 @@ class EngineTwin {
       anomalyScore: Number.isFinite(anomaly.score) ? Number(anomaly.score.toFixed(2)) : 0,
       anomalyDetectorFitted: this.anomalyDetector.fitted,
       rul,
+      fatigue,
       explanation,
       recommendation,
     };

@@ -81,6 +81,78 @@ const FAULT_APPLICATORS = {
       manifoldPressureKPa: reading.manifoldPressureKPa * (1 - severity * 0.18),
     };
   },
+
+  // ---- Fault families required by the master plan's 8-category taxonomy, -----
+  // previously missing: sensor drift/failure, cooling/coking degradation,
+  // injector abnormality, misfire and combustion instability.
+
+  sensorDrift(reading, severity) {
+    // Transducer failure semantics: the physical engine is untouched and a
+    // SINGLE signal drifts, so the reading does not correlate with the other
+    // sensors the way a real fault would. batteryVoltage has no correlation
+    // partner in the fault set, which keeps this misattribution deliberately
+    // clean — exactly the failure mode single-sensor thresholds mishandle.
+    return { batteryVoltage: reading.batteryVoltage - severity * 1.7 };
+  },
+
+  coking(reading, severity) {
+    // Episodic proxy for a cooling/coking degradation episode (blocked
+    // cooling airflow / accumulated deposits): heat rejection degrades.
+    return {
+      cht: reading.cht + severity * 32,
+      egt: reading.egt + severity * 40,
+      oilTemp: reading.oilTemp + severity * 14,
+      manifoldPressureKPa: reading.manifoldPressureKPa * (1 - severity * 0.12),
+      rpm: reading.rpm - severity * 70,
+    };
+  },
+
+  injectorAbnormality(reading, severity, t) {
+    // One injector over-fuels and one goes lean — per-cylinder fuel-trim
+    // divergence plus a lean lambda wander and a pulse-width anomaly.
+    const n = Array.isArray(reading.perCylinderFuelTrim) ? reading.perCylinderFuelTrim.length : 6;
+    const idx = Math.abs(Math.floor(t)) % n;
+    const trim = Array.isArray(reading.perCylinderFuelTrim)
+      ? reading.perCylinderFuelTrim.slice()
+      : Array(n).fill(1);
+    trim[idx] = Math.min(1.6, trim[idx] + severity * 0.5);
+    trim[(idx + 1) % n] = Math.max(0.4, trim[(idx + 1) % n] - severity * 0.45);
+    return {
+      // λ swings lean as a cylinder runs out of fuel; another runs rich.
+      lambda: reading.lambda * (1 + severity * 0.07),
+      injectorPulseWidth: reading.injectorPulseWidth * (1 + severity * 0.16),
+      fuelFlow: reading.fuelFlow * (1 + severity * 0.12),
+      rpm: reading.rpm - severity * 55,
+      perCylinderFuelTrim: trim,
+      vibration: reading.vibration + severity * 0.3,
+    };
+  },
+
+  misfire(reading, severity, t) {
+    // Intermittent missed combustion events: torque/RPM ripples, EGT jitter
+    // in step with RPM, λ momentarily rich as unburned fuel fires late.
+    const misfiring = Math.sin(t * 3.1) > 0.82;
+    const jolt = misfiring ? severity * 190 : 0;
+    return {
+      rpm: reading.rpm - severity * 120 - jolt,
+      egt: reading.egt - severity * 28 + (misfiring ? severity * 45 : 0),
+      lambda: reading.lambda * (1 + severity * 0.04),
+      vibration: reading.vibration + severity * 1.3,
+    };
+  },
+
+  combustionInstability(reading, severity, t) {
+    // Oscillating knock/misfire-adjacent instability: λ and torque ripple
+    // around a rising-average mean rather than a one-directional drift.
+    const osc = Math.sin(t * 0.9);
+    return {
+      rpm: reading.rpm - severity * 55 + severity * 95 * osc,
+      egt: reading.egt + severity * 18 + severity * 38 * osc,
+      lambda: reading.lambda * (1 + severity * 0.09 * osc),
+      manifoldPressureKPa: reading.manifoldPressureKPa * (1 + severity * 0.08 * osc),
+      vibration: reading.vibration + severity * 0.9,
+    };
+  },
 };
 
 function createFaultSchedule(types, rng) {
@@ -105,7 +177,10 @@ function applyFaults(cleanReading, severities, t = 0) {
     if (!applicator) continue;
     const patch = applicator(reading, severity, t);
     for (const [k, v] of Object.entries(patch)) {
-      if (Number.isFinite(v)) reading[k] = v; // ignore a non-finite override, keep the clean value
+      // Accept scalar numbers and array patches (e.g. per-cylinder fuel trim);
+      // ignore a non-finite scalar, keep the clean value.
+      const ok = Array.isArray(v) ? v.every(Number.isFinite) : Number.isFinite(v);
+      if (ok) reading[k] = v;
     }
   }
   return reading;

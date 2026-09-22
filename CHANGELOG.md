@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] - mission replay & artificial CAN
+
+### Added
+- **Spec-driven mission replay (`missionreplay/`).** A deterministic,
+  operator-seeded synthetic recorder: `generateMission({seed})` writes
+  `manifest.json` (schema "1.0"), `telemetry.jsonl`, `faults.json`,
+  `telemetry.idx` (byte-offset seek index) and optional `can.jsonl`. The
+  7-phase flight schedule (taxi → takeoff → climb → cruise → loiter →
+  descent → landing), cosine-eased 15 s transition windows, first-order lag,
+  gaussian noise, clamps, time-windowed fault injection and consecutive-
+  sample detection rules are byte-identical across runs with the same seed.
+- **Mission replay API.** `POST /api/mission-replay/generate`,
+  `GET /api/mission-replay`, `GET /api/mission-replay/:missionId/{manifest,
+  faults,phases,state,range,snapshot}`, `POST /api/mission-replay/:missionId/
+  control` (seek/step/play/pause/resume/stop), plus `mission-replay-frame`
+  Socket.IO events.
+- **Artificial J1939 CAN bus (`missionreplay/can.js`).** 29-bit arbitration
+  IDs, 11-signal PGN map, 5 nodes, uint16 byte-scale encode/decode round trip,
+  bounded receive ring buffer with dropped-frame accounting. Wired to
+  `GET /api/can/status`; live mission-replay playback streams frames onto it.
+- **8-class fault library (`missionreplay/faultLib.js`)** with injected vs.
+  emergent (rule-detected, `injected: false`) events and a
+  `OVERRANGE_SENSOR` (-32000) dropout sentinel; docs updated.
+- **Tests:** `tests/missionreplay/missionreplay.test.js` (32 cases:
+  determinism, manifest, idx seek, interpolation, fault-boundary snapping,
+  3-tier anomaly overlay, CAN round trip/status) and
+  `tests/server/missionReplay.test.js` (11 HTTP cases). Full suite green, lint clean.
+
 ## [1.1.0] - 2026-09-19
 
 Production-hardening release. Telemetry is still fully simulated and the

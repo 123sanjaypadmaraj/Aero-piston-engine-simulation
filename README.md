@@ -51,6 +51,17 @@ engine health, predicted faults, and mission reliability on a live dashboard.
   `ai/groqClient.js`), orchestrated with caching, event-driven + interval-based
   refresh, and graceful fallback (`ai/analysisEngine.js`). See **AI Engine Situation Analysis** below.
 
+- **Spec-driven mission replay + artificial CAN (`missionreplay/`)** — a
+  separate synthetic recorder that generates **deterministic, labeled mission
+  logs** (7-phase profile → eased transitions → lagged, noisy telemetry →
+  time-windowed fault injection → clamped output) with an operator-supplied
+  seed, then replays them with interpolation, fault-boundary snapping and a
+  3-tier anomaly overlay. Each generated mission log is byte-identical across
+  runs with the same seed, which makes it a ready source of labeled training
+  data. A J1939-flavoured artificial CAN bus (`missionreplay/can.js`) pushes
+  replay frames onto a 5-node bus exposed at `GET /api/can/status`. See
+  **Spec-driven mission replay & artificial CAN** below.
+
 ## Quick start
 
 Requires **Node.js >= 20** (developed on Node 24).
@@ -130,10 +141,21 @@ Base URL `http://localhost:5000`. Errors are JSON: `{ "error": "...", "detail"?:
 | `GET /api/engine-sim/recordings/:engineId/:missionId` | Full recorded time series |
 | `POST /api/engine-sim/replay/:engineId/:missionId` | Start a replay (*heavy*, admin key if configured) |
 | `POST /api/engine-sim/replay/:engineId/control` | pause / resume / seek / speed / stop (admin key if configured) |
+| `GET /api/mission-replay` | List generated mission-replay ids |
+| `POST /api/mission-replay/generate` | Generate a deterministic mission log (*heavy*, admin key if configured) |
+| `GET /api/mission-replay/:missionId/manifest` | Generated mission manifest (schema version, profile, RNG seed) |
+| `GET /api/mission-replay/:missionId/faults` | Fault-event table (onset / detected / resolved / precursor window) |
+| `GET /api/mission-replay/:missionId/phases` | Phase schedule (taxi / takeoff / climb / ... / landing) |
+| `GET /api/mission-replay/:missionId/state` | Interpolated sample at `?t_s=` with anomaly overlay |
+| `GET /api/mission-replay/:missionId/range` | Time/sample-bounded slice: `?start_s=&end_s=&maxSamples=` |
+| `GET /api/mission-replay/:missionId/snapshot` | Current playhead state |
+| `POST /api/mission-replay/:missionId/control` | seek / step / play / pause / resume / stop (admin key if configured) |
+| `GET /api/can/status` | Artificial J1939 CAN bus: nodes, sent/dropped counts, ring-buffer load |
 
 Socket.IO events (server -> client): `snapshot` (every tick, and once on
 connect), `ai-analysis` (when a fresh analysis completes), `replay-frame`
-(during a replay).
+(during an `engine_sim/` replay), `mission-replay-frame` (during a
+`mission-replay` playback).
 
 When `ADMIN_API_KEY` is set, every non-GET request under `/api` must send
 `x-api-key: <key>`; GET routes and the dashboard stay open. The bundled
@@ -171,6 +193,35 @@ on demand, persist every tick, and be replayed back later:
 
 The dashboard does not yet have UI for these — they're API/Socket.IO-only
 for now (see `docs/ROADMAP.md`).
+
+## Spec-driven mission replay & artificial CAN (`missionreplay/`)
+
+A second, independent synthetic recorder built around an operator-supplied
+spec rather than a physics sim. Every bounded step is committed to disk so a
+**regenerated flight is byte-identical given the same seed** — the log itself
+is the labeled training artifact:
+
+- Generate a mission (default seed = FNV hash of mission id + inputs, or pin
+  your own): `POST /api/mission-replay/generate`
+  `{ "missionId": "MSN-2026-0001", "duration": 21600, "faults": [{ "type": "oil_pressure_degradation", "onset_s": 9000, "severity": "moderate" }], "seed": 42 }`
+  (`duration` 30-86400 s, default 21600; `sampleRateHz` 1-10, default 1;
+  `faults[].type` ∈ the 8 classes in `docs/FAULT_TAXONOMY.md`;
+  `phases[]` optional override of the 7-phase schedule; `recordCan` optional)
+- Writes `<TWIN_DATA_DIR>/missionreplay/<missionId>/` —
+  `manifest.json` (schema version "1.0", engine model, phase schedule, RNG
+  seed), `telemetry.jsonl` (one sample per `t_s`), `faults.json` (windowed
+  fault events), `telemetry.idx` (byte offsets for O(1) seek) and optionally
+  `can.jsonl`.
+- Query it back: `GET /api/mission-replay/<missionId>/manifest|faults|phases`,
+  `GET .../state?t_s=7000` (interpolated sample + anomaly tier), `GET
+  .../range?start_s=&end_s=&maxSamples=` (bounded slice), `GET .../snapshot`.
+- Advance a playhead: `POST /api/mission-replay/<missionId>/control`
+  `{ "action": "seek" | "step" | "play" | "pause" | "resume" | "stop", "value": ... }`
+  — `play` streams `mission-replay-frame` Socket.IO events and pushes every
+  frame onto the artificial CAN bus.
+- The artificial J1939 bus (`missionreplay/can.js`) uses 29-bit arbitration
+  IDs, an 11-signal PGN map, a 5-node table and uint16 byte-scale encoding;
+  `GET /api/can/status` reports node/load/error state.
 
 ## Advanced analytics (`analytics/`)
 

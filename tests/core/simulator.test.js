@@ -33,8 +33,11 @@ function assertSnapshotSane(engine) {
 
 test('exports keep their contract', () => {
   assert.equal(typeof DigitalTwinFleet, 'function');
-  assert.equal(SENSOR_KEYS.length, 9);
-  assert.deepEqual(Object.keys(FAULT_TYPES).sort(), ['fuelStarvation', 'overheat', 'oilLoss', 'vibration'].sort());
+  assert.equal(SENSOR_KEYS.length, 13); // 9 legacy + lambda, injectorPulseWidth, injectionTiming, alternatorCurrent
+  assert.deepEqual(
+    Object.keys(FAULT_TYPES).sort(),
+    ['fuelStarvation', 'overheat', 'oilLoss', 'vibration', 'sensorDrift', 'coking', 'injectorAbnormality', 'misfire', 'combustionInstability'].sort(),
+  );
   assert.ok(Array.isArray(FLEET) && FLEET.length >= 1);
   for (const k of SENSOR_KEYS) assert.ok(PHYSICAL_RANGE[k], `physical range for ${k}`);
 });

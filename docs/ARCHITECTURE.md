@@ -11,10 +11,10 @@ is stated plainly rather than glossed over.
 | Layer | Plan's role | This repo |
 |---|---|---|
 | L0 — Virtual engine | Ground-truth engine physics | `simulator.js`'s live-fleet `EngineTwin` (random-walk + fault drift) drives the always-on dashboard feed; `engine_sim/`'s mean-value physics model (Wiebe-style combustion, ISA altitude derating, thermal lag) is wired in separately via the on-demand mission runner — both exist side by side, see "Two ground-truth sources," below |
-| L1 — Data acquisition / edge | Sensor realism, framing, transport | `simulator.js`'s per-sensor noise/random-walk + threshold classification; transport is **Socket.IO**, not CAN/MQTT (see "What was not built," below) |
+| L1 — Data acquisition / edge | Sensor realism, framing, transport | `simulator.js`'s per-sensor noise/random-walk + threshold classification; live transport is **Socket.IO**; the synthetic mission recorder additionally pushes replay frames through an in-process **artificial J1939-flavoured CAN bus** (`missionreplay/can.js`) exposed at `/api/can/status` (see below) |
 | L2 — Digital twin core | Ingest, live state, history, APIs | `server.js` (Express REST + Socket.IO broadcast); `twin_core/store.js` persists every `engine_sim/` mission run to disk (JSON-Lines) and backs the replay endpoints |
 | L3 — AI/ML analytics | Anomaly detection, RUL, explainability | `analytics/` (rate-aware health index, multivariate Mahalanobis anomaly detector, RUL estimator, offline explainability) runs **inside** `simulator.js`'s per-tick `EngineTwin.step()` — its output rides along on every engine's `analytics` field in `/api/snapshot`; `ai/` (RAG "situation report" via Gemini with automatic Groq fallback, then a rule-based sentence) runs alongside it in `server.js` |
-| L4 — Dashboard / replay | Operator HMI, mission replay | `public/` (vanilla HTML/CSS/JS dashboard with a self-hosted canvas chart) consumes the live feed; `replay/` streams a recorded `engine_sim/` mission back out over the `replay-frame` Socket.IO event at variable speed, driven by `server.js`'s `/api/engine-sim/replay/*` routes |
+| L4 — Dashboard / replay | Operator HMI, mission replay | `public/` (vanilla HTML/CSS/JS dashboard with a self-hosted canvas chart) consumes the live feed; `replay/` streams a recorded `engine_sim/` mission back out over the `replay-frame` Socket.IO event at variable speed, driven by `server.js`'s `/api/engine-sim/replay/*` routes; `missionreplay/` adds a **second, spec-driven** replay path — deterministic synthetic mission logs (JSON-Lines telemetry + manifest + fault table + byte-offset index) served over `/api/mission-replay/*` |
 
 ### Two ground-truth sources, on purpose
 
@@ -96,13 +96,26 @@ natural next step (see `docs/ROADMAP.md`).
 
 The master plan specified CAN-bus simulation via Linux `vcan`/SocketCAN +
 `python-can`, an MQTT broker for telemetry transport, and a Python/FastAPI +
-TimescaleDB/InfluxDB backend. None of that is present in this repository:
+TimescaleDB/InfluxDB backend. This remains true of the **live** telemetry
+path — `simulator.js`'s fleet feed is still emitted directly over Socket.IO.
+The mission-replay recorder, however, gained a pure-JS replacement:
 
-- **No CAN bus.** `vcan`/SocketCAN is Linux-only kernel functionality; this
-  prototype was developed and runs on Windows, so there is no virtual CAN
-  interface, no arbitration-ID frame encoding, and no DBC-style signal
-  definitions. `simulator.js`'s `EngineTwin.step()` produces a JSON reading
-  object directly — there is no bus-framing step to decode.
+- **No real vcan/SocketCAN.** `vcan` is Linux-only kernel functionality and
+  this prototype runs on Windows, so frames can never ride a kernel virtual
+  interface here. In its place, `missionreplay/can.js` implements a
+  *J1939-flavoured artificial CAN bus in JS*: 29-bit arbitration IDs (CAN
+  ID layout with priority / PGN / source address), an 11-signal PGN map, a
+  5-node table (ECU, oil system, thermal, fuel system, MEMS), uint16
+  byte-scale signal encoding, a bounded ring-buffer receive window with
+  dropped-frame accounting, and a bit-perfect `encodeSample`/`decodeFrames`
+  round trip. The bus is a first-class citizen of the deterministic mission
+  record (each logged sample also carries its CAN frames), and it is wired
+  into `server.js` so that live mission-replay playback streams frames onto
+  the bus while `GET /api/can/status` reports node/load/error state. There
+  is still no *real* CAN adapter, no outside publisher/subscriber, and no
+  DBC-style external schema — but the bus-framing + BAM-session + byte-scale
+  encode/decode mechanics the master plan asked for now exist and are
+  exercised by tests.
 - **No MQTT.** Telemetry transport is **Socket.IO** (`server.js`, `io.emit('snapshot', ...)`)
   over a local Express HTTP server, not a pub/sub broker with topics like
   `engine/<tail>/<parameter>`. This is architecturally simpler (no broker
@@ -110,17 +123,70 @@ TimescaleDB/InfluxDB backend. None of that is present in this repository:
   (no independent publishers/subscribers, no QoS, no topic-based routing).
 - **No Python/FastAPI/TimescaleDB.** The entire backend is Node.js/Express.
   Time-series storage, where implemented at all, lives in `twin_core/`
-  as part of this same Node process rather than a dedicated time-series
-  database.
+  (and `missionreplay/`'s JSON-Lines mission logs) as part of this same Node
+  process rather than a dedicated time-series database.
 
 None of this blocks the functional goal (a working health-monitoring +
 fault-prediction + dashboard loop over simulated data) — Socket.IO
 legitimately plays the "telemetry bus" role end-to-end, and the REST/socket
 API surface in `server.js` is exactly what would stay unchanged if a real
-CAN/MQTT ingest layer were dropped in later (see `docs/ROADMAP.md`). But if
-"CAN bus simulation" or "MQTT" specifically are graded/scored deliverables,
-they are gaps, not just implementation-detail differences, and should be
-called out as such rather than implied as done.
+CAN/MQTT ingest layer were dropped in later (see `docs/ROADMAP.md`). On the
+grading question: "CAN bus simulation" is now *partially* covered — `missionreplay/`
+demonstrates J1939-style arbitration-ID framing, byte-scale signal
+encode/decode, a multi-node bus, and a status endpoint, but on an
+in-process JS bus rather than a Linux `vcan`/SocketCAN interface. MQTT is
+still a genuine gap, not just an implementation-detail difference, and
+should be called out as such rather than implied as done.
+
+## Mission replay synthesis + artificial CAN (`missionreplay/`)
+
+This subsystem generates **deterministic, labeled mission logs** for the
+"labeled synthetic training data" workflow the master plan's Phases 1/5/6
+called for. It is deliberately independent from `engine_sim/` + `replay/`:
+its ground truth is a phase-profile planner (`profiles.js`) rather than the
+mean-value physics model, so the two recorder families can cross-check each
+other. Everything downstream of generation is expressed against the logical
+sample time `t_s`, not wall-clock (no async drift).
+
+- **Synthesis pipeline** (`generator.js`) — for each 1 s sample: eased phase
+  target (cosine over a 15 s transition window) → first-order lag (thermal
+  params respond slowly) → gaussian noise from the seeded RNG → fault overlay
+  → clamps. Each run is **byte-identical to any other run with the same
+  seed**; the seed defaults to an FNV hash of the mission id + inputs and can
+  be pinned deliberately so a "regenerate the same flight tomorrow" test is
+  possible. Output: `manifest.json` (`schema_version: "1.0"` gate), the JSON-
+  Lines telemetry log, `faults.json` (time-windowed events), `telemetry.idx`
+  (byte offset per line so the loader can seek in O(1)), and `can.jsonl`
+  when CAN recording is on.
+- **Fault injection** (`faultLib.js`) — 8 fault classes run on an
+  onset/detected/resolved time window with a `precursor_window_s`:
+  `oil_pressure_degradation`, `oil_starvation`, `fuel_starvation`,
+  `detonation_risk`, `vibration_anomaly`, `overheating`, `plug_fouling`,
+  `sensor_dropout`. Injection degrades a severity-multiplied parameter over
+  the window; a detection-rule table marks the `detected_s` (fires only on
+  N consecutive out-of-band samples, with margin guards so phase ramps don't
+  trip it). Events injected by the operator are `injected: true`; events
+  that emerge from the detection rules alone are `injected: false` and
+  recover automatically. Sensor dropout serialises as the
+  `OVERRANGE_SENSOR = -32000` sentinel (JSON has no NaN).
+- **Replay** (`replay.js`) — `stateAt(t_s)` returns an interpolated sample
+  (floor-index + linear interpolation) but *snaps* cleanly across a fault
+  onset/resolution boundary rather than blending, `getRange` returns
+  time-bounded, sample-bounded slices, `.seek/.step/.play/.pause/.resume/
+  .stop` drive a playhead, and a **3-tier anomaly overlay** labels every
+  sample `nominal` / `precursor` / `active` based on detected fault windows.
+- **Artificial J1939 CAN** (`can.js`) — a JS-only replacement for the
+  Linux `vcan`/SocketCAN plan (see "What was not built," above): each
+  engine signal has its own PGN, is byte-scaled into uint16, and is loaded
+  into 29-bit arbitration IDs; a 5-node bus with a bounded receive window
+  and dropped-frame counters exposes `createCanBus().status()`.
+- **HTTP surface** (`server.js`) — `POST /api/mission-replay/generate`,
+  `GET /api/mission-replay/:missionId/{manifest,faults,phases}`,
+  `GET /api/mission-replay/:missionId/{state,range,snapshot}`,
+  `POST /api/mission-replay/:missionId/control` (seek/step/play/pause/
+  resume/stop), and `GET /api/can/status`. Live `play` frames are also
+  emitted as `mission-replay-frame` Socket.IO events and pushed onto the
+  bus so the CAN status endpoint shows live traffic.
 
 ## Module responsibilities (current + planned)
 
@@ -162,6 +228,20 @@ called out as such rather than implied as done.
   original timestamps, over the `replay-frame` Socket.IO event
   (`server.js`'s `/api/engine-sim/replay/:engineId/:missionId` and
   `/control` routes start/pause/resume/seek/stop it).
+- **`missionreplay/`** — L4+ (spec-driven synthetic recorder + replay +
+  artificial CAN): `profiles.js` (7-phase mission schedule, cosine transition
+  windows, per-parameter noise/clamps/lag), `faultLib.js` (8 injected fault
+  classes with time-windowed degradation and consecutive-sample detection
+  rules), `can.js` (J1939-flavoured artificial bus: 29-bit arbitration,
+  11-signal PGN map, 5 nodes, byte-scale encode/decode round trip),
+  `generator.js` (deterministic `generateMission({seed})` — seed from the
+  mission id unless overridden; writes `manifest.json`, `telemetry.jsonl`,
+  `faults.json`, a byte-offset index `telemetry.idx`, and optionally
+  `can.jsonl`), `loader.js` (schema-gated load + O(1) seek on the offset
+  index), `replay.js` (interpolated `.stateAt/.getRange`, fault-boundary
+  snapping, 3-tier anomaly overlay). Served by `server.js` at
+  `/api/mission-replay/*` and `/api/can/status`; detailed design in
+  "Mission replay synthesis + artificial CAN" below.
 - **`public/js/twin3d.js`** — L4: the 3D visual twin (three.js). Consumes
   the same per-engine snapshot as the dashboard (`window.twin3d.update`),
   never recomputes status client-side, and uses `/api/meta` SENSORS bands
