@@ -23,6 +23,7 @@ COPY --chown=node:node ai ./ai
 COPY --chown=node:node analytics ./analytics
 COPY --chown=node:node engine_sim ./engine_sim
 COPY --chown=node:node middleware ./middleware
+COPY --chown=node:node missionreplay ./missionreplay
 COPY --chown=node:node replay ./replay
 COPY --chown=node:node twin_core ./twin_core
 COPY --chown=node:node public ./public
