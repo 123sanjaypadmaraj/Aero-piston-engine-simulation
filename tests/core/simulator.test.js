@@ -141,11 +141,14 @@ test('series() returns a defensive copy and null for unknown engines', () => {
 test('each fault type is reported as the active fault and eventually raises alerts', () => {
   for (const type of Object.keys(FAULT_TYPES)) {
     const fleet = new DigitalTwinFleet({ seed: 11, clock: steppingClock() });
-    fleet.injectFault('uav-02', type, 45);
+    // A fault ramps to full severity over DRIFT_TICKS and develops gradually; a
+    // forced arc long enough to reach full severity then plateau, so a gentle
+    // signature still gets time to build up to an operator-visible alert.
+    fleet.injectFault('uav-02', type, 140);
     let snap;
     let sawActive = false;
     let sawPredicted = false;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 145; i++) {
       snap = fleet.step();
       const e = snap.engines[1];
       if (e.activeFault && e.activeFault.type === type) sawActive = true;
@@ -168,6 +171,7 @@ test('an overheat fault drives cht/egt up and health down; it resolves with an i
   fleet.engines[0].faultCooldown = 999; // no random faults interfering
   fleet.injectFault('uav-01', 'overheat', 40);
   let peakEgt = 0;
+  let peakCht = 0;
   let minHealth = 100;
   let last;
   const seenAlerts = []; // the snapshot only carries the newest 8 alerts, so collect across ticks
@@ -175,9 +179,11 @@ test('an overheat fault drives cht/egt up and health down; it resolves with an i
     last = fleet.step().engines[0];
     seenAlerts.push(...last.alerts);
     peakEgt = Math.max(peakEgt, last.readings.egt);
+    peakCht = Math.max(peakCht, last.readings.cht);
     minHealth = Math.min(minHealth, last.health);
   }
   assert.ok(peakEgt > before.readings.egt + 40, `egt rose: ${before.readings.egt} -> ${peakEgt}`);
+  assert.ok(peakCht > before.readings.cht + 20, `cht rose: ${before.readings.cht} -> ${peakCht}`);
   assert.ok(minHealth < before.health, `health fell: ${before.health} -> ${minHealth}`);
   assert.equal(last.activeFault, null);
   assert.ok(seenAlerts.some((a) => a.severity === 'info' && /resolved/.test(a.message)));
@@ -206,8 +212,14 @@ test('a critical alert is de-duplicated within its cooldown window', () => {
 
 test('allAlerts is newest-first, honours limit and tolerates bad limits', () => {
   const fleet = new DigitalTwinFleet({ seed: 21, clock: steppingClock() });
-  for (const [i, type] of Object.keys(FAULT_TYPES).entries()) fleet.injectFault(FLEET[i % FLEET.length].id, type, 30);
-  for (let i = 0; i < 40; i++) fleet.step();
+  // Cycle a developed fault on one engine at a time so each arc runs to
+  // completion (resolution info alert) before the next is injected.
+  const types = Object.keys(FAULT_TYPES);
+  for (const type of types) {
+    const engineId = FLEET[types.indexOf(type) % FLEET.length].id;
+    fleet.injectFault(engineId, type, 40);
+    for (let i = 0; i < 50; i++) fleet.step();
+  }
   const all = fleet.allAlerts(500);
   assert.ok(all.length > 5);
   for (let i = 1; i < all.length; i++) assert.ok(Date.parse(all[i - 1].time) >= Date.parse(all[i].time));

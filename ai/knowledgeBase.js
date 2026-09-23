@@ -14,6 +14,14 @@
  * to match the rest of this project's "runs anywhere with just Node.js"
  * philosophy — retrieval here is simple tag matching (see retriever.js),
  * which is plenty for a knowledge base this size.
+ *
+ * The final block of entries (pattern-*) are "combined signature"
+ * documents: they are tagged with *several* sensors at once, so the
+ * retriever only surfaces them when those signals are all out of their
+ * nominal band simultaneously — that is what lets the AI explain a
+ * multi-factor pattern (e.g. CHT + vibration both rising) instead of
+ * treating each sensor in isolation, and crucially, lets it tell a
+ * developing degradation apart from a sudden accident/failure event.
  * -----------------------------------------------------------------------
  */
 
@@ -43,6 +51,18 @@ const KNOWLEDGE_BASE = Object.freeze([
     tags: ['fuelStarvation', 'fuelFlow', 'rpm', 'manifoldPressure'],
     title: 'Fuel System Degradation',
     text: 'Falling fuel flow alongside drooping RPM and manifold pressure suggests fuel system degradation: a clogging filter, a failing fuel pump, fuel vaporization, or a restricted line. This can progress to a partial or full power loss. Recommended action: switch to backup fuel pump/tank if available, monitor for further flow decay, and treat this as a mission-abort trigger if flow continues to fall.',
+  },
+  {
+    id: 'pattern-cooling-vibration',
+    tags: ['cht', 'egt', 'vibration', 'combined'],
+    title: 'Combined: CHT/EGT Rising WITH Vibration — Cooling & Coking Degradation, NOT an Accident',
+    text: 'This is the key combined-signature pattern. When CHT and EGT climb slowly *together with* a gradual, multi-minute vibration rise and oil temperature creeping up, the cause is a cooling/coking degradation path (restricted cooling baffles/inlets, oil cooler fouling, carbon/coking on cylinders and exhaust) — a serious but *gradual* condition. It is NOT an accident. The signature of an accident is different: a sudden, large vibration spike or an abrupt RPM/fuel-flow collapse that arrives fast (in seconds), out of proportion to any temperature trend, and often simultaneously across several sensors. So the same two sensors read differently depending on rate and pairing: slow CHT+EGT+vibration together months of gradual degradation; a single violent spike + abrupt RPM loss is a mechanical failure event. Recommended action for the gradual case: reduce power, monitor for a plateau, and schedule cooling/coking inspection — do not treat it as a crash-imminent emergency.',
+  },
+  {
+    id: 'pattern-power-loss',
+    tags: ['rpm', 'fuelFlow', 'manifoldPressure', 'vibration', 'combined'],
+    title: 'Combined: RPM + Fuel Flow + Manifold Pressure Collapsing Together — Power-Loss / Accident Event',
+    text: 'A simultaneous collapse of RPM, fuel flow and manifold pressure, especially if a vibration spike arrives with it, is the strongest combined-signature of an accident-class power-loss event (propeller strike, ignition/mechanical failure, or fuel delivery loss), NOT a slow degradation. Fuel-system degradation develops gradually (the fault-fuelStarvation pattern) and only ONE side fades at a time. When all three power channels drop together and fast, this is a mission-abort, immediate-power-reduction emergency. Distinguish by rate and simultaneity: gradual flow-first decay = degradation (land and inspect); instant three-sensor collapse + vibration = accident (reduce power to the minimum viable setting, secure the engine, and land immediately).',
   },
   {
     id: 'sensor-rpm',

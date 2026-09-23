@@ -291,7 +291,39 @@ pushed the moment it is ready via the `ai-analysis` socket event. The
 dashboard's **AI Engine Situation Report** panel renders it live, with an
 **Explain now** button to force an on-demand analysis for the selected engine.
 
-### AI provider fallback
+#audit trail (on-disk csv log, ground truth vs detectors, CI tripwire via
+`scripts/evaluate-missionreplay.js`).
+
+## Accident taxonomy & combined-pattern grounding (RAG corpus)
+
+The AI box's whole job is to read *combined signatures* — e.g. CHT + EGT +
+vibration rising together means **cooling/coking degradation**, not an
+accident, while a vibration spike + RPM/fuel-flow collapse means an
+**accident-class power-loss**. To make that reproducible instead of
+hand-wavy, the RAG corpus and the mission library both grow dedicated,
+cross-referenced pieces:
+
+- `docs/FAULT_TAXONOMY.md` - the 8-class fault taxonomy (single injected /
+  emergent events) that the mission analyzer and detectors are evaluated
+  against.
+- `docs/ACCIDENT_TAXONOMY.md` - the **accident**-class companion: how the
+  same sensors read when multiple channels degrade AT ONCE (overlapping /
+  cascading faults don't "resolve" - they compound), and why the correct
+  read is often "cooling/coking degradation that escalated to an accident"
+  rather than "several independent faults".
+- `ai/knowledgeBase.js` now ships combined-signature docs
+  (`pattern-cooling-vibration`, `pattern-power-loss` etc.) whose tags span
+  MULTIPLE sensors, so `ai/retriever.js` only surfaces them when those
+  sensors are out of band together - the RAG step that keeps the AI from
+  explaining each sensor in isolation.
+- `scripts/demo-accident-scenario.js` - runs one deterministic mission
+  where three injected faults OVERLAP and CASCADE exactly the way a real
+  accident does (thermal + mechanical + fuel channels degrading
+  simultaneously), feeds it through both detectors, and exits non-zero if
+  the combined accident is missed. Works in and out of Docker via
+  `TWIN_DATA_DIR` (same convention as the mission-replay evaluator).
+
+## AI provider fallback
 
 ```
 request -> Gemini (primary, per AI_PROVIDER_ORDER)

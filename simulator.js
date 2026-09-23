@@ -63,27 +63,31 @@ const SENSORS = {
   alternatorCurrent: { unit: 'A', nominal: [6, 32], lowWarn: 6, lowCrit: 4, highWarn: Infinity, highCrit: Infinity, label: 'Alternator Current' },
 };
 
+// `drift` entries are the peak deviation each affected sensor is driven to,
+// expressed as a FRACTION of that sensor's nominal span (so comparable across
+// sensors of wildly different ranges, e.g. RPM vs battery voltage); the fault
+// ramps toward that offset and holds it for the rest of the fault arc.
 const FAULT_TYPES = {
   overheat: {
     label: 'Thermal Overload (CHT/EGT Rising)',
     affects: ['cht', 'egt', 'oilTemp'],
-    drift: { cht: 0.9, egt: 1.6, oilTemp: 0.45 },
+    drift: { cht: 1.0, egt: 1.3, oilTemp: 0.9 },
   },
   oilLoss: {
     label: 'Oil Pressure Loss',
     affects: ['oilPressure', 'oilTemp', 'vibration'],
-    drift: { oilPressure: -2.4, oilTemp: 0.3, vibration: 0.03 },
+    drift: { oilPressure: -1.5, oilTemp: 0.6, vibration: 0.05 },
   },
   vibration: {
     label: 'Mechanical Imbalance / Vibration Anomaly',
     affects: ['vibration', 'rpm'],
-    drift: { vibration: 0.16, rpm: -6 },
-    wobble: { vibration: 0.4, rpm: 18 },
+    drift: { vibration: 1.1, rpm: -0.9 },
+    wobble: { vibration: 0.25, rpm: 10 },
   },
   fuelStarvation: {
     label: 'Fuel System Degradation',
     affects: ['fuelFlow', 'rpm', 'manifoldPressure'],
-    drift: { fuelFlow: -0.22, rpm: -12, manifoldPressure: -0.6 },
+    drift: { fuelFlow: -0.9, rpm: -1.0, manifoldPressure: -0.9 },
   },
   // ---- Master-plan fault families that were previously missing: ----------
   sensorDrift: {
@@ -93,30 +97,30 @@ const FAULT_TYPES = {
     // (mis-)attribution rather than a correlated multi-sensor drift.
     affects: ['batteryVoltage'],
     bias: { batteryVoltage: -1.2 },
-    drift: { batteryVoltage: -0.2 },
+    drift: { batteryVoltage: -0.8 },
   },
   coking: {
     label: 'Cooling / Coking Degradation',
     affects: ['cht', 'egt', 'oilTemp', 'manifoldPressure'],
-    drift: { cht: 1.1, egt: 1.2, oilTemp: 0.5, manifoldPressure: -1.8 },
+    drift: { cht: 1.1, egt: 1.0, oilTemp: 0.9, manifoldPressure: -0.8 },
   },
   injectorAbnormality: {
     label: 'Injector Abnormality',
     affects: ['lambda', 'injectorPulseWidth', 'fuelFlow', 'rpm'],
-    drift: { lambda: 0.6, injectorPulseWidth: 0.6, fuelFlow: 0.4, rpm: -28 },
-    wobble: { lambda: 0.15, injectorPulseWidth: 0.12 },
+    drift: { lambda: 0.7, injectorPulseWidth: 0.7, fuelFlow: 0.9, rpm: -0.8 },
+    wobble: { lambda: 0.12, injectorPulseWidth: 0.1 },
   },
   misfire: {
     label: 'Misfire',
     affects: ['rpm', 'egt', 'lambda'],
-    drift: { rpm: -25, egt: -14, lambda: -0.06 },
-    wobble: { rpm: 60, egt: 18, lambda: 0.2 },
+    drift: { rpm: -0.85, egt: -1.0, lambda: -0.8 },
+    wobble: { rpm: 18, egt: 8, lambda: 0.12 },
   },
   combustionInstability: {
     label: 'Combustion Instability',
     affects: ['lambda', 'rpm', 'egt', 'manifoldPressure'],
-    drift: { lambda: 0.35, rpm: -25, egt: 10, manifoldPressure: 0.6 },
-    wobble: { lambda: 0.4, rpm: 25, egt: 16, manifoldPressure: 1.8 },
+    drift: { lambda: 0.8, rpm: -0.8, egt: 1.0, manifoldPressure: 0.9 },
+    wobble: { lambda: 0.25, rpm: 12, egt: 10, manifoldPressure: 1.2 },
   },
 };
 
@@ -154,6 +158,24 @@ const TIMESERIES_LEN = 120; // samples kept for charting (~4 min @ 2s tick)
 const MAX_ALERTS = 40; // alerts kept per engine
 const ANALYTICS_HISTORY_LEN = 60; // health/anomaly score history for the RUL features
 const WARMUP_MAX = 40; // healthy samples retained for fitting the anomaly detector
+
+// Fault realism knobs. A fault should read like a slowly-developing
+// maintenance-worthy condition, not a sudden slam: each affected sensor is
+// driven toward a severity-scaled offset (bounded, see updateSensor), random
+// faults are rare (FAULT_PROB) and persist long enough to look like a real
+// developing failure, and a persistent critical condition re-announces itself
+// at a human-plausible cadence rather than every 2s tick.
+const DRIFT_TICKS = 40; // ticks (~80 s) for a fault to reach full severity
+const NEXT_FAULT_MIN = 60; // ticks an engine idles before a random fault is possible
+const NEXT_FAULT_MAX = 140;
+const FAULT_PROB = 0.04; // chance per eligible tick to start a fault
+const FAULT_TICKS_MIN = 50; // random fault duration (ticks)
+const FAULT_TICKS_MAX = 120;
+const FAULT_BREAK_MIN = 40; // cooldown ticks after a fault resolves
+const FAULT_BREAK_MAX = 90;
+const VALIDITY_COOLDOWN_MS = 30_000; // re-fire pacing for sensor validity warnings
+const CRITICAL_COOLDOWN_MS = 90_000; // a sustained critical re-announces itself every ~90 s, not every 15 s
+const PREDICTED_COOLDOWN_MS = 90_000; // prediction warnings re-fire at most once a minute and a half
 
 function mid(range) { return (range[0] + range[1]) / 2; }
 function clamp(v, lo, hi) {
@@ -199,7 +221,7 @@ class EngineTwin {
     this.airspeed = this.rand(120, 175); // km/h
     this.hoursFlown = this.rand(120, 890);
     this.activeFault = null; // { type, ticksLeft, startedAt }
-    this.faultCooldown = this.randInt(15, 35); // ticks until a fault may start
+    this.faultCooldown = this.randInt(NEXT_FAULT_MIN, NEXT_FAULT_MAX); // ticks until a fault may start
     this.alerts = [];
     this.healthScore = 100;
     this.rul = 500; // remaining useful life, engine hours (sim)
@@ -249,17 +271,18 @@ class EngineTwin {
   maybeStartFault() {
     if (this.activeFault) return;
     if (this.faultCooldown > 0) { this.faultCooldown--; return; }
-    // 12% chance per eligible tick to start a fault scenario
-    if (this.rng() < 0.12) {
+    // Only a rare random fault is possible once the cooldown has elapsed —
+    // a healthy fleet is mostly quiet, with an occasional developing anomaly.
+    if (this.rng() < FAULT_PROB) {
       const keys = Object.keys(FAULT_TYPES);
       const type = keys[this.randInt(0, keys.length - 1)];
       this.activeFault = {
         type,
-        ticksLeft: this.randInt(18, 40),
+        ticksLeft: this.randInt(FAULT_TICKS_MIN, FAULT_TICKS_MAX),
         severityRamp: 0,
       };
     } else {
-      this.faultCooldown = this.randInt(4, 10);
+      this.faultCooldown = this.randInt(10, 20);
     }
   }
 
@@ -267,11 +290,13 @@ class EngineTwin {
     if (!this.activeFault) return {};
     const fault = FAULT_TYPES[this.activeFault.type];
     this.activeFault.ticksLeft--;
-    this.activeFault.severityRamp = clamp(this.activeFault.severityRamp + 1, 0, 24);
+    // severity ramps linearly toward full strength over DRIFT_TICKS ticks, so
+    // a fault develops gradually: early prediction/warning, then deeper.
+    this.activeFault.severityRamp = clamp(this.activeFault.severityRamp + 1, 0, DRIFT_TICKS);
     if (this.activeFault.ticksLeft <= 0) {
       const resolved = this.activeFault;
       this.activeFault = null;
-      this.faultCooldown = this.randInt(25, 60);
+      this.faultCooldown = this.randInt(FAULT_BREAK_MIN, FAULT_BREAK_MAX);
       this.alerts.unshift({
         id: `${this.meta.id}-${this.now()}-${++this._alertSeq}`, // seq: two alerts in one ms must not share an id
         engineId: this.meta.id,
@@ -297,13 +322,19 @@ class EngineTwin {
     const noise = this.gauss() * span * 0.018;
     let next = cur + reversion + noise;
 
-    // apply active fault drift, scaled by how far into the fault we are
+    // apply active fault drift: the affected sensor is driven toward a
+    // severity-scaled offset from its nominal centre (first-order approach),
+    // so a developing fault converges to a bounded deviation instead of an
+    // runaway worth of accumulated steps. The order the sensors cross their
+    // thresholds therefore tracks a plausible onset: predict -> warn -> harsh.
     if (this.activeFault) {
       const fault = FAULT_TYPES[this.activeFault.type];
       const drift = fault.drift && fault.drift[key];
       if (drift !== undefined) {
-        const ramp = this.activeFault.severityRamp / 24;
-        next += drift * span * 0.03 * (0.4 + ramp);
+        const ramp = this.activeFault.severityRamp / DRIFT_TICKS; // 0..1
+        const center = mid(SENSORS[key].nominal);
+        const targetOffset = drift * span * (0.25 + 0.75 * ramp);
+        next += (center + targetOffset - next) * 0.12;
       }
       // oscillatory signatures (misfire, combustion instability, injector
       // ripple) — a wobble is invisible to a plain trend check but shows up
@@ -395,7 +426,9 @@ class EngineTwin {
     const predictedFault = bestScore >= 1.6 ? {
       type: bestType,
       label: FAULT_TYPES[bestType].label,
-      confidence: clamp(Math.round((bestScore / 8) * 100), 0, 99),
+      // A soft predictor: cap well below 100% so a prediction alert never reads
+      // like a certain verdict — a statistical model is not ground truth.
+      confidence: clamp(Math.round((bestScore / 8) * 100), 0, 92),
     } : null;
 
     // Remaining useful life: degrades faster when health is poor, recovers
@@ -410,7 +443,7 @@ class EngineTwin {
   maybeRaiseAlert(readings, prediction, validity = {}) {
     for (const [key, v] of Object.entries(validity)) {
       if (v !== 'ok') {
-        this.pushAlert('warning', `${SENSORS[key].label} sensor ${v.toUpperCase()} — reading not trusted, holding last valid value`, `validity:${key}`);
+        this.pushAlert('warning', `${SENSORS[key].label} sensor ${v.toUpperCase()} — reading not trusted, holding last valid value`, `validity:${key}`, VALIDITY_COOLDOWN_MS);
       }
     }
     for (const flag of prediction.flags) {
@@ -420,6 +453,7 @@ class EngineTwin {
           'critical',
           `${SENSORS[flag.key].label} in CRITICAL range: ${readings[flag.key].toFixed(1)} ${SENSORS[flag.key].unit}`,
           `critical:${flag.key}`,
+          CRITICAL_COOLDOWN_MS,
         );
       }
     }
@@ -428,6 +462,7 @@ class EngineTwin {
         'warning',
         `AI model predicts "${prediction.predictedFault.label}" — confidence ${prediction.predictedFault.confidence}%`,
         `predicted:${prediction.predictedFault.type}`,
+        PREDICTED_COOLDOWN_MS,
       );
     }
   }
@@ -464,7 +499,7 @@ class EngineTwin {
     const validity = {};
     const statuses = {};
     const activeBias = this.activeFault ? FAULT_TYPES[this.activeFault.type].bias : null;
-    const biasRamp = this.activeFault ? 0.6 + this.activeFault.severityRamp / 24 : 0;
+    const biasRamp = this.activeFault ? 0.6 + 0.4 * clamp(this.activeFault.severityRamp / DRIFT_TICKS, 0, 1) : 0;
     for (const key of Object.keys(SENSORS)) {
       let truth = this.updateSensor(key);
       // Sensor-drift semantics: bias the acquired reading WITHOUT moving the
