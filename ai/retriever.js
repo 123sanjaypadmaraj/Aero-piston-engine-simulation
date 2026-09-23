@@ -80,4 +80,74 @@ function retrieveContext(engineSnapshot, topK = DEFAULT_TOP_K) {
   return top;
 }
 
-module.exports = { retrieveContext, interestTags };
+/**
+ * Deterministic, LLM-free verdict on whether the current combined sensor
+ * signature is an *accident* (immediate power-loss / mechanical collapse)
+ * or a *degradation* (cooling/coking/fouling that looks similar but is
+ * NOT crash-imminent). Grounded in the same combined-pattern KB docs the
+ * retriever surfaces, not in an LLM call — so the AI box's most dangerous
+ * classification ("is this an accident right now?") is unit-testable and
+ * CI-gateable in BOTH directions, which is the whole point of the combined
+ * signature class (see docs/ACCIDENT_TAXONOMY.md and the
+ * pattern-cooling-vibration / pattern-power-loss KB docs).
+ *
+ * Class-of-signature rules (kept in sync with the KB docs):
+ *   - Slow CHT/EGT/climb WITH a gradual vibration rise (cooling/coking
+ *     degradation) resolves to `degradation`, NOT `accident` — even though
+ *     several channels are off-nominal at once, they moved together SLOWLY.
+ *   - An abrupt, simultaneous collapse of RPM + fuel flow + manifold
+ *     pressure (optionally with a vibration spike) resolves to `accident`
+ *     — multi-channel combined power loss that arrives fast.
+ *   - Anything that drifts on only ONE channel (or a few, slowly) with no
+ *     combined power-loss signature is `nominal`/`degradation`, never
+ *     `accident`.
+ *
+ * @param {object} engineSnapshot  same shape retrieveContext takes.
+ * @param {object} [opts]          { thresholdS } — accident margin in seconds.
+ * @returns {{className: 'accident'|'degradation'|'nominal',
+ *            patternIds: string[], evidence: string[],
+ *            accidentScore: number, degradationScore: number}}
+ */
+function classifySignature(engineSnapshot, opts = {}) {
+  const snap = engineSnapshot && typeof engineSnapshot === 'object' ? engineSnapshot : {};
+  const statuses = snap.statuses && typeof snap.statuses === 'object' ? snap.statuses : {};
+  const status = (k) => statuses[k];
+  const any = (...ks) => ks.some((k) => status(k));
+  const all = (...ks) => ks.every((k) => status(k));
+  const counts = { accident: 0, degradation: 0 };
+  const evidence = [];
+  const patternIds = [];
+
+  const push = (id, why) => { patternIds.push(id); evidence.push(why); };
+
+  // Accident leg — abrupt combined power collapse. These KB docs say the
+  // three-channel collapse (RPM+fuel+MP, with or without a vibe spike) is
+  // THE combined signature of an accident, NOT three separate faults.
+  if (all('rpm', 'fuelFlow', 'manifoldPressure') || all('rpm', 'fuelFlow', 'manifoldPressure', 'vibration')) {
+    counts.accident += 3;
+    push('pattern-power-loss', 'RPM+fuel flow+manifold pressure collapsing together (vibration accompanies it) = accident-class power loss');
+  } else if (any('rpm', 'fuelFlow', 'manifoldPressure')) {
+    counts.degradation += 1;
+    evidence.push('isolated power-channel drift without the full combined collapse = degradation, not accident');
+  }
+
+  // Look-alike leg — the cooling/coking case from the KB doc: CHT/EGT
+  // climbing SLOWLY with a gradual vibration rise is a serious but gradual
+  // degradation, explicitly NOT an accident. It must never flip to accident
+  // on its own (that is the exact false-accident the class exists to kill).
+  if (all('cht', 'egt') && any('vibration')) {
+    if (counts.accident === 0) counts.degradation += 3;
+    push('pattern-cooling-vibration', 'CHT+EGT climbing together with vibration = cooling/coking degradation, NOT an accident');
+  } else if (all('cht', 'egt') || any('cht', 'egt', 'vibration')) {
+    counts.degradation += 1;
+  }
+
+  if (counts.accident === 0 && counts.degradation === 0) {
+    evidence.push('no combined off-nominal signature — nominal health');
+  }
+
+  const className = counts.accident > 0 ? 'accident' : (counts.degradation > 0 ? 'degradation' : 'nominal');
+  return { className, patternIds, evidence, accidentScore: counts.accident, degradationScore: counts.degradation };
+}
+
+module.exports = { retrieveContext, interestTags, classifySignature };
