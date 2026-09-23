@@ -96,6 +96,19 @@ describe('mission replay + CAN endpoints', () => {
     assert.equal(badStep.status, 400);
   });
 
+  test('evaluation runs analytics over the log and scores detectors', async () => {
+    const ev = await request(s.port, { path: `/api/mission-replay/${MISSION_ID}/evaluation` });
+    assert.equal(ev.status, 200);
+    assert.equal(ev.json.calibration.mode, 'self-calibrated');
+    assert.ok(ev.json.detectors.rule && ev.json.detectors.analytics && ev.json.detectors.combined);
+    assert.equal(ev.json.groundTruth.injectedEvents, 1);
+    const evThr = await request(s.port, { path: `/api/mission-replay/${MISSION_ID}/evaluation?threshold=0` });
+    assert.equal(evThr.status, 200);
+    assert.equal(evThr.json.calibration.mode, 'absolute');
+    const bad = await request(s.port, { path: `/api/mission-replay/${MISSION_ID}/evaluation?margin=99` });
+    assert.equal(bad.status, 400);
+  });
+
   test('unknown mission is a 404; traversal attempts fail safeId', async () => {
     const missing = await request(s.port, { path: '/api/mission-replay/no-such-mission/state' });
     assert.equal(missing.status, 404);

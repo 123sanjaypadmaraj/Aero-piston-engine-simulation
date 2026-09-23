@@ -20,6 +20,15 @@ All notable changes to this project are documented here. The format follows
   faults,phases,state,range,snapshot}`, `POST /api/mission-replay/:missionId/
   control` (seek/step/play/pause/resume/stop), plus `mission-replay-frame`
   Socket.IO events.
+- **Cross-pipeline evaluation.** `analytics/missionReplayMetrics.js` closes
+  the loop for the first time: it runs the L3 health model over a generated
+  mission log and scores each detector — the rule-based consecutive-sample
+  detector vs. the analytics health index (self-calibrated to the mission's
+  own known-good baseline, with an absolute-threshold override) — against the
+  injected ground truth. Output: sample-level precision/recall/F1 per
+  detector, per-fault detection latency, a margin sweep, and emergent
+  (false-alarm) events. Exposed at `GET /api/mission-replay/:missionId/
+  evaluation` and as `scripts/evaluate-missionreplay.js`.
 - **Artificial J1939 CAN bus (`missionreplay/can.js`).** 29-bit arbitration
   IDs, 11-signal PGN map, 5 nodes, uint16 byte-scale encode/decode round trip,
   bounded receive ring buffer with dropped-frame accounting. Wired to
@@ -29,8 +38,11 @@ All notable changes to this project are documented here. The format follows
   `OVERRANGE_SENSOR` (-32000) dropout sentinel; docs updated.
 - **Tests:** `tests/missionreplay/missionreplay.test.js` (32 cases:
   determinism, manifest, idx seek, interpolation, fault-boundary snapping,
-  3-tier anomaly overlay, CAN round trip/status) and
-  `tests/server/missionReplay.test.js` (11 HTTP cases). Full suite green, lint clean.
+  3-tier anomaly overlay, CAN round trip/status),
+  `tests/server/missionReplay.test.js` (12 HTTP cases incl. the evaluation
+  endpoint) and `tests/analytics/missionReplayMetrics.test.js` (7 cross-
+  pipeline cases: self-calibrated scoring, clean-mission quietness,
+  determinism, dropout latency, margin sensitivity). Full suite green, lint clean.
 
 ## [1.1.0] - 2026-09-19
 

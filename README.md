@@ -59,7 +59,10 @@ engine health, predicted faults, and mission reliability on a live dashboard.
   3-tier anomaly overlay. Each generated mission log is byte-identical across
   runs with the same seed, which makes it a ready source of labeled training
   data. A J1939-flavoured artificial CAN bus (`missionreplay/can.js`) pushes
-  replay frames onto a 5-node bus exposed at `GET /api/can/status`. See
+  replay frames onto a 5-node bus exposed at `GET /api/can/status`. The logs
+  are also scored end-to-end: `analytics/missionReplayMetrics.js` runs the L3
+  health model over them and reports precision/recall/F1 for each detector
+  against the injected ground truth (`GET .../evaluation`). See
   **Spec-driven mission replay & artificial CAN** below.
 
 ## Quick start
@@ -150,6 +153,7 @@ Base URL `http://localhost:5000`. Errors are JSON: `{ "error": "...", "detail"?:
 | `GET /api/mission-replay/:missionId/range` | Time/sample-bounded slice: `?start_s=&end_s=&maxSamples=` |
 | `GET /api/mission-replay/:missionId/snapshot` | Current playhead state |
 | `POST /api/mission-replay/:missionId/control` | seek / step / play / pause / resume / stop (admin key if configured) |
+| `GET /api/mission-replay/:missionId/evaluation` | Score every detector against injected ground truth (precision/recall/F1); `?margin=` baseline margin, `?threshold=` absolute override |
 | `GET /api/can/status` | Artificial J1939 CAN bus: nodes, sent/dropped counts, ring-buffer load |
 
 Socket.IO events (server -> client): `snapshot` (every tick, and once on
@@ -219,6 +223,15 @@ is the labeled training artifact:
   `{ "action": "seek" | "step" | "play" | "pause" | "resume" | "stop", "value": ... }`
   — `play` streams `mission-replay-frame` Socket.IO events and pushes every
   frame onto the artificial CAN bus.
+- Score the pipeline end-to-end: `GET /api/mission-replay/<missionId>/evaluation`
+  runs `analytics/`'s rate-aware health model over the log and reports
+  precision/recall/F1 per detector against the injected ground truth — the
+  rule-based consecutive-sample detector vs. the analytics health model
+  (self-calibrated to the mission's own known-good baseline, since the
+  absolute bands are fleet-tuned; `?threshold=` forces absolute mode). A
+  per-fault breakdown gives detection latency (onset → detected) per event,
+  and a `marginSweep` shows the precision/recall trade-off. Reproduce the
+  library + table with `node scripts/evaluate-missionreplay.js`.
 - The artificial J1939 bus (`missionreplay/can.js`) uses 29-bit arbitration
   IDs, an 11-signal PGN map, a 5-node table and uint16 byte-scale encoding;
   `GET /api/can/status` reports node/load/error state.

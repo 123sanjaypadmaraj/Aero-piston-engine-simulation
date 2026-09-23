@@ -19,6 +19,10 @@ const {
   missionFatigue, missionReport, monteCarloFatigue, partHoursToD1,
   partStatus, statusLabel, MAX_FATIGUE_HOURS, DEFAULT_SCATTER,
 } = require('./fatigueRul');
+const {
+  evaluateMissionReplay, toAnalyticValues,
+  DEFAULT_BASELINE_MARGIN, DEFAULT_WARMUP_SAMPLES,
+} = require('./missionReplayMetrics');
 
 module.exports = {
   computeHealthIndex, classify, SENSOR_DEFS, TREND_CATEGORY_MAP,
@@ -37,4 +41,6 @@ module.exports = {
   createFatigueState, partDutyStress, advanceFatigue, fatigueReport,
   missionFatigue, missionReport, monteCarloFatigue, partHoursToD1,
   partStatus, statusLabel, MAX_FATIGUE_HOURS, DEFAULT_SCATTER,
+  evaluateMissionReplay, toAnalyticValues,
+  DEFAULT_BASELINE_MARGIN, DEFAULT_WARMUP_SAMPLES,
 };

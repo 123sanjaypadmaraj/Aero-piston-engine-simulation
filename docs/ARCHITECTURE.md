@@ -184,9 +184,21 @@ sample time `t_s`, not wall-clock (no async drift).
   `GET /api/mission-replay/:missionId/{manifest,faults,phases}`,
   `GET /api/mission-replay/:missionId/{state,range,snapshot}`,
   `POST /api/mission-replay/:missionId/control` (seek/step/play/pause/
-  resume/stop), and `GET /api/can/status`. Live `play` frames are also
-  emitted as `mission-replay-frame` Socket.IO events and pushed onto the
+  resume/stop), `GET /api/mission-replay/:missionId/evaluation`, and
+  `GET /api/can/status`. Live `play` frames are also emitted as
+  `mission-replay-frame` Socket.IO events and pushed onto the
   bus so the CAN status endpoint shows live traffic.
+- **Cross-pipeline scoring** (`analytics/missionReplayMetrics.js`) — closes
+  the loop between the L3 layer and the recorder: it replays a generated log
+  through `analytics/healthIndex` and scores the rule-based detector vs. the
+  analytics model against the injected ground truth (precision/recall/F1,
+  per-fault latency, margin sweep). Because the health model's absolute bands
+  are fleet-tuned (`simulator.js`'s regime), the analytics detector is
+  self-calibrated to the mission's own known-good baseline by default, with
+  an absolute-threshold override. Notable emergent finding it already
+  surfaces: a `-32000` dropout on a sensor whose band is high-only reads as
+  *nominal* to the health index — the rule-based dropout rule exists precisely
+  because of that gap.
 
 ## Module responsibilities (current + planned)
 

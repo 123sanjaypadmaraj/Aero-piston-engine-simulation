@@ -45,7 +45,7 @@ const { DigitalTwinFleet, SENSORS, FAULT_TYPES } = require('./simulator');
 const { AiAnalysisEngine } = require('./ai/analysisEngine');
 const { PhysicsEngine, MISSIONS } = require('./engine_sim');
 const { FAULT_APPLICATORS } = require('./engine_sim/faults');
-const { forecastEngine } = require('./analytics');
+const { forecastEngine, evaluateMissionReplay } = require('./analytics');
 const { store: twinStore, stateStore, liveHistory } = require('./twin_core');
 const { missionRunner, replayEngine } = require('./replay');
 const missionReplay = require('./missionreplay');
@@ -505,6 +505,20 @@ function createServer(options = {}) {
   app.get('/api/mission-replay/:missionId/snapshot', (req, res) => {
     const { pl } = loadReplayRecord(safeId(req.params.missionId, 'missionId'));
     res.json(pl.snapshot());
+  });
+
+  // Cross-pipeline scoring: run the analytics L3 health model over the log and
+  // score each detector against the injected ground truth (precision/recall).
+  // Defaults to self-calibrated (baseline margin); ?threshold= overrides with
+  // the absolute health value.
+  app.get('/api/mission-replay/:missionId/evaluation', (req, res) => {
+    const { record } = loadReplayRecord(safeId(req.params.missionId, 'missionId'));
+    if (req.query.margin !== undefined) numberInRange(Number(req.query.margin), 'margin', 0, 60);
+    if (req.query.threshold !== undefined) numberInRange(Number(req.query.threshold), 'threshold', 0, 100);
+    const opts = {};
+    if (req.query.margin !== undefined) opts.baselineMargin = Number(req.query.margin);
+    if (req.query.threshold !== undefined) opts.healthThreshold = Number(req.query.threshold);
+    res.json(evaluateMissionReplay(record, opts));
   });
 
   // Post-forward endpoint: position a player and (optionally) tick it. The
