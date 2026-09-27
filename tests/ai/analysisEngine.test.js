@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { AiAnalysisEngine, buildPrompt, fallbackText, severityKey } = require('../../ai/analysisEngine');
-const { retrieveContext } = require('../../ai/retriever');
+const { retrieveContext, classifySignature } = require('../../ai/retriever');
 const { KNOWLEDGE_BASE } = require('../../ai/knowledgeBase');
 const {
   GEMINI_KEY, geminiOk, groqOk, errorResponse, mockFetch, fakeClock, silentLogger, bothKeys, engineSnap, fleetSnap,
@@ -227,4 +227,77 @@ test('retriever ranks the active fault and its critical sensors first', () => {
   assert.equal(docs[0].id, 'fault-oilLoss');
   assert.ok(docs.some((d) => d.id === 'sensor-oilPressure'));
   assert.ok(Object.isFrozen(KNOWLEDGE_BASE));
+});
+
+// --- runtime wiring of the deterministic verdict ---------------------------
+// classifySignature() used to be exported and unit-tested but never CALLED by
+// the analysis engine, so the "deterministic accident verdict" shipped as a
+// documented feature that no request path actually executed. These tests pin
+// the wiring: the verdict must be computed on every analysis, attached to the
+// stored/emitted payload, handed to the prompt as a constraint, and survive a
+// total provider failure (it is the safety floor, so it cannot depend on the
+// LLM being reachable).
+
+test('wiring: every analysis carries a deterministic verdict, LLM-free', async (t) => {
+  const net = mockFetch({ gemini: geminiOk('Narrative text.') });
+  t.after(net.restore);
+  const { ai } = makeEngine();
+  const r = await ai.refresh(engineSnap(), fleetSnap());
+  assert.ok(r.verdict, 'analysis result must expose a verdict');
+  assert.equal(typeof r.verdict.className, 'string');
+  assert.ok(['accident', 'degradation', 'nominal'].includes(r.verdict.className));
+  assert.ok(Array.isArray(r.verdict.patternIds));
+  assert.ok(Array.isArray(r.verdict.evidence));
+  assert.equal(r.verdict.accidentScore, 0, 'the nominal test engine must not score as an accident');
+  ai.close();
+});
+
+test('wiring: accident verdict is attached when channels collapse together', async (t) => {
+  const net = mockFetch({ gemini: geminiOk('Narrative text.') });
+  t.after(net.restore);
+  const { ai, emitted } = makeEngine();
+  const crash = engineSnap({
+    statuses: { rpm: 'critical', fuelFlow: 'critical', manifoldPressure: 'critical', cht: 'warning', egt: 'warning' },
+  });
+  const r = await ai.refresh(crash, fleetSnap());
+  assert.equal(r.verdict.className, 'accident');
+  assert.ok(r.verdict.accidentScore > 0);
+  assert.ok(r.verdict.patternIds.includes('pattern-power-loss'));
+  // it must reach the client, not just the internal store
+  assert.equal(emitted.at(-1).event, 'ai-analysis');
+  assert.equal(emitted.at(-1).payload.verdict.className, 'accident');
+  ai.close();
+});
+
+test('wiring: verdict survives provider failure (safety floor must not need the LLM)', async (t) => {
+  const net = mockFetch({ gemini: errorResponse(500, 'upstream boom'), groq: errorResponse(500, 'upstream boom') });
+  t.after(net.restore);
+  const { ai } = makeEngine();
+  const crash = engineSnap({
+    statuses: { rpm: 'critical', fuelFlow: 'critical', manifoldPressure: 'critical' },
+  });
+  const r = await ai.refresh(crash, fleetSnap());
+  assert.equal(r.degraded, true, 'expected the rule-based fallback path');
+  assert.ok(r.verdict, 'the degraded path must still carry the verdict');
+  assert.equal(r.verdict.className, 'accident', 'an accident must be reported even with no LLM available');
+  ai.close();
+});
+
+test('wiring: prompt carries the verdict as an explicit constraint', () => {
+  const crash = engineSnap({
+    statuses: { rpm: 'critical', fuelFlow: 'critical', manifoldPressure: 'critical' },
+  });
+  const docs = retrieveContext(crash);
+  const p = buildPrompt(crash, fleetSnap(), docs, classifySignature(crash));
+  assert.match(p, /DETERMINISTIC FAULT VERDICT/);
+  assert.match(p, /Classification: accident/);
+  assert.match(p, /pattern-power-loss/);
+  assert.match(p, /treat as authoritative/i, 'the LLM must be told not to contradict the classification');
+});
+
+test('wiring: prompt still builds when no verdict is supplied (back-compat)', () => {
+  const p = buildPrompt(engineSnap(), fleetSnap(), retrieveContext(engineSnap()));
+  assert.doesNotThrow(() => p);
+  assert.ok(!p.includes('undefined'), 'no undefined leaks into the prompt');
+  assert.ok(!p.includes('NaN'));
 });

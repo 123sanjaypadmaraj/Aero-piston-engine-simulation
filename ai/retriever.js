@@ -102,18 +102,23 @@ function retrieveContext(engineSnapshot, topK = DEFAULT_TOP_K) {
  *     combined power-loss signature is `nominal`/`degradation`, never
  *     `accident`.
  *
+ * Only `warning` and `critical` count as off-nominal. A status of `nominal`
+ * — or any unknown/empty value — is deliberately NOT treated as off-nominal:
+ * testing raw truthiness would make a healthy engine with a fully populated
+ * status map read as a multi-channel fault.
+ *
  * @param {object} engineSnapshot  same shape retrieveContext takes.
- * @param {object} [opts]          { thresholdS } — accident margin in seconds.
  * @returns {{className: 'accident'|'degradation'|'nominal',
  *            patternIds: string[], evidence: string[],
  *            accidentScore: number, degradationScore: number}}
  */
-function classifySignature(engineSnapshot, opts = {}) {
+function classifySignature(engineSnapshot) {
   const snap = engineSnapshot && typeof engineSnapshot === 'object' ? engineSnapshot : {};
   const statuses = snap.statuses && typeof snap.statuses === 'object' ? snap.statuses : {};
-  const status = (k) => statuses[k];
-  const any = (...ks) => ks.some((k) => status(k));
-  const all = (...ks) => ks.every((k) => status(k));
+  // Severity-aware, not truthiness-based: only real off-nominal states count.
+  const off = (k) => statuses[k] === 'warning' || statuses[k] === 'critical';
+  const any = (...ks) => ks.some((k) => off(k));
+  const all = (...ks) => ks.every((k) => off(k));
   const counts = { accident: 0, degradation: 0 };
   const evidence = [];
   const patternIds = [];

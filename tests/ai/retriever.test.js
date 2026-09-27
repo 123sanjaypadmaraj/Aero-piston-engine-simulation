@@ -61,3 +61,58 @@ test('isolated single-channel drift never escalates to accident', () => {
   assert.equal(idle.className, 'nominal');
   assert.equal(idle.accidentScore, 0);
 });
+
+// --- regression: a HEALTHY engine must never read as a multi-channel fault ---
+// The classifier previously used raw truthiness, so a fully populated but
+// all-'nominal' status map satisfied `all('rpm','fuelFlow','manifoldPressure')`
+// and produced a false `accident` on a perfectly healthy engine. Only
+// 'warning' and 'critical' may count as off-nominal.
+
+test('regression: all-nominal populated status map = nominal, never accident', () => {
+  const v = classifySignature({
+    statuses: {
+      rpm: 'nominal', fuelFlow: 'nominal', manifoldPressure: 'nominal',
+      vibration: 'nominal', cht: 'nominal', egt: 'nominal', oilPressure: 'nominal',
+    },
+  });
+  assert.equal(v.className, 'nominal', 'a healthy engine must not be classified by status presence alone');
+  assert.equal(v.accidentScore, 0, 'all-nominal must never carry accident score');
+  assert.equal(v.degradationScore, 0, 'all-nominal must not carry degradation score either');
+  assert.deepEqual(v.patternIds, [], 'no combined pattern may match an all-nominal snapshot');
+});
+
+test('regression: the cooling look-alike stays degradation when channels are only partially off-nominal', () => {
+  // rpm/fuel/MP are nominal here; only the thermal pair plus vibration drift.
+  const v = classifySignature({
+    statuses: { rpm: 'nominal', fuelFlow: 'nominal', manifoldPressure: 'nominal', cht: WARN, egt: WARN, vibration: WARN },
+  });
+  assert.equal(v.className, 'degradation');
+  assert.equal(v.accidentScore, 0);
+  assert.ok(v.patternIds.includes('pattern-cooling-vibration'));
+});
+
+test('regression: unknown/garbage status values are ignored, not treated as off-nominal', () => {
+  const v = classifySignature({
+    statuses: { rpm: '', fuelFlow: null, manifoldPressure: undefined, cht: 'unknown', egt: 'N/A' },
+  });
+  assert.equal(v.className, 'nominal', 'non-severity strings must not be read as faults');
+  assert.equal(v.accidentScore, 0);
+});
+
+test('classifySignature is robust to null, non-object and missing-status snapshots', () => {
+  for (const bad of [null, undefined, {}, 'nonsense', 42, []]) {
+    const v = classifySignature(bad);
+    assert.equal(v.className, 'nominal');
+    assert.equal(v.accidentScore, 0);
+    assert.equal(v.degradationScore, 0);
+    assert.ok(Array.isArray(v.evidence) && v.evidence.length > 0, 'must still return evidence');
+  }
+  // status map present but not an object
+  const odd = classifySignature({ statuses: 'not-an-object' });
+  assert.equal(odd.className, 'nominal');
+});
+
+test('classifySignature takes no options argument (dead param removed)', () => {
+  // If a second parameter is ever reintroduced it must be used, not ignored.
+  assert.equal(classifySignature.length, 1, 'signature must be single-argument');
+});
