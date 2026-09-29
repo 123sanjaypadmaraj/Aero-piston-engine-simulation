@@ -202,7 +202,176 @@
     </div>
   </main>
 
-  <footer class="footer">
+    <details class="mission-lab" id="missionLab">
+      <summary>
+        <span class="ml-chevron" aria-hidden="true">&#9656;</span>
+        <h2 class="ml-title">Mission Lab</h2>
+        <span class="ml-subtitle">Deterministic replay &middot; fault injection &middot; artificial CAN</span>
+        <span class="ml-head-spacer"></span>
+        <span class="ml-status">
+          <span class="ml-status-item" id="mlStatusHealth"><span class="ml-dot" data-state="err"></span><span class="ml-status-text">checking</span></span>
+          <span class="ml-status-item" id="mlStatusSensors"><span class="ml-dot" data-state="warn"></span><span class="ml-status-text">sensors</span></span>
+          <span class="ml-status-item" id="mlStatusCan"><span class="ml-dot" data-state="warn"></span><span class="ml-status-text">CAN</span></span>
+        </span>
+      </summary>
+
+      <p class="ml-replay-flag" id="mlReplayFlag" data-active="false" role="status">
+        <span class="ml-replay-dot" aria-hidden="true"></span>
+        REPLAY PLAYBACK ACTIVE &mdash; the readouts below are a recorded mission, not live telemetry
+      </p>
+
+      <div class="ml-body">
+        <div class="ml-col">
+          <div class="ml-card">
+            <h3>Fault injection</h3>
+            <p class="ml-hint" id="mlFaultHint">Stage a preset or build a fault stack, then generate a deterministic mission.</p>
+            <div class="ml-presets">
+              <button type="button" class="ml-btn" id="mlPresetLookalike">Preset: look-alike degradation</button>
+              <button type="button" class="ml-btn" id="mlPresetCascade">Preset: combined multi-fault cascade</button>
+            </div>
+            <div class="ml-field-row">
+              <div class="ml-field">
+                <label for="mlMissionId">Mission ID</label>
+                <input type="text" id="mlMissionId" value="lab-demo" spellcheck="false" autocomplete="off" />
+              </div>
+              <div class="ml-field">
+                <label for="mlDuration">Duration (s)</label>
+                <input type="number" id="mlDuration" value="3600" min="30" max="86400" step="1" />
+              </div>
+            </div>
+            <div class="ml-field-row">
+              <div class="ml-field">
+                <label for="mlSeed">Seed (blank = auto)</label>
+                <input type="number" id="mlSeed" placeholder="auto · reproducible" min="0" max="4294967295" step="1" />
+              </div>
+              <div class="ml-field">
+                <label for="mlRate">Sample rate (Hz)</label>
+                <select id="mlRate"><option value="1">1</option><option value="2">2</option><option value="5">5</option><option value="10">10</option></select>
+              </div>
+            </div>
+            <label class="ml-check"><input type="checkbox" id="mlRecordCan" checked /> Record artificial CAN frames</label>
+            <div class="ml-field">
+              <label>Fault stack</label>
+              <datalist id="mlFaultTypes"></datalist>
+              <div class="ml-fault-rows" id="mlFaultRows"></div>
+            </div>
+            <div class="ml-btn-row grow">
+              <button type="button" class="ml-btn" id="mlAddFault">+ Add fault</button>
+              <button type="button" class="ml-btn primary" id="mlGenerateBtn">Generate mission</button>
+            </div>
+            <p class="ml-msg" id="mlInjectMsg" hidden></p>
+          </div>
+
+          <div class="ml-card">
+            <h3>Mission library</h3>
+            <p class="ml-hint">Missions generated on this server. With the seed left blank the seed is derived from the mission ID, duration, rate and fault stack — so the same inputs always reproduce the same flight, and any judge can re-run it and get identical numbers.</p>
+            <div class="ml-missions" id="mlMissions"></div>
+            <div class="ml-btn-row grow" style="margin-top:9px">
+              <button type="button" class="ml-btn" id="mlRefreshMissions">Refresh library</button>
+            </div>
+            <p class="ml-msg" id="mlLibraryMsg" hidden></p>
+          </div>
+
+          <div class="ml-card">
+            <h3>Artificial CAN bus (J1939 sim)</h3>
+            <p class="ml-hint">Frames are published while a mission replays, so the bus shows live traffic.</p>
+            <div class="ml-can-nodes" id="mlCanNodes"></div>
+            <div class="ml-can-stats" id="mlCanStats">CAN bus status unavailable.</div>
+            <div class="ml-can-frames" id="mlCanFrames"></div>
+            <p class="ml-hint">Newest frames only — the bus emits about 12 per replayed second, so the full log is not worth scrolling.</p>
+            <div class="ml-btn-row grow" style="margin-top:9px">
+              <button type="button" class="ml-btn" id="mlRefreshCan">Refresh CAN status</button>
+              <button type="button" class="ml-btn" id="mlRefreshStatus">Refresh system status</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ml-col">
+          <div class="ml-card">
+            <h3>Replay transport</h3>
+            <p class="ml-hint">Active mission: <strong id="mlActiveMission">none</strong></p>
+            <div class="ml-transport">
+              <div class="ml-scrub-row">
+                <button type="button" class="ml-btn" id="mlToStart" title="Back to start">&#124;&#9664;</button>
+                <button type="button" class="ml-btn" id="mlStepBack" title="Step back one sample">&#9664;</button>
+                <button type="button" class="ml-btn primary" id="mlPlayBtn">Play</button>
+                <button type="button" class="ml-btn" id="mlStepFwd" title="Step forward one sample">&#9654;</button>
+                <button type="button" class="ml-btn danger" id="mlStopBtn">Stop</button>
+                <span class="ml-clock" id="mlClock">--:-- / --:--</span>
+              </div>
+              <input type="range" class="ml-scrub" id="mlScrub" min="0" max="1" value="0" step="1" disabled aria-label="Replay position" />
+              <div class="ml-speed-row">
+                <span class="ml-label">Speed</span>
+                <button type="button" class="ml-speed" id="mlSpeed1" aria-pressed="false">1&times;</button>
+                <button type="button" class="ml-speed" id="mlSpeed5" aria-pressed="false">5&times;</button>
+                <button type="button" class="ml-speed" id="mlSpeed20" aria-pressed="true">20&times;</button>
+                <button type="button" class="ml-speed" id="mlSpeed100" aria-pressed="false">100&times;</button>
+                <button type="button" class="ml-speed" id="mlSpeed500" aria-pressed="false">500&times;</button>
+              </div>
+            </div>
+            <p class="ml-msg" id="mlReplayMsg" hidden></p>
+            <p class="ml-msg" id="mlEngineSimFrame" hidden></p>
+            <div class="ml-phasebar">
+              <div class="ml-phases" id="mlPhases"></div>
+              <span class="ml-phase-marker" id="mlPhaseMarker" hidden></span>
+            </div>
+            <p class="ml-msg" id="mlRangeInfo" style="color:#8ba0b3"></p>
+          </div>
+
+          <div class="ml-card">
+            <h3>AI box verdict (live fleet)</h3>
+            <p class="ml-hint">
+              The authoritative classification, computed server-side by <code>classifySignature()</code> and handed to the
+              LLM as a safety floor. The replay mirror above is a display aid; this one is the real verdict.
+            </p>
+            <div class="ml-kv" id="mlAiVerdict"></div>
+            <div class="ml-btn-row grow" style="margin-top:9px">
+              <button type="button" class="ml-btn" id="mlRefreshAi">Refresh AI verdicts</button>
+            </div>
+          </div>
+
+          <div class="ml-card">
+            <h3>Deterministic verdict (replay mirror)</h3>
+            <p class="ml-hint">
+              A UI-side mirror of the server's <code>classifySignature()</code>, rebuilt from raw replay values using the
+              generator's own per-phase nominal bands. It is a display aid — the authoritative verdict is the AI box card above.
+              Accident-class is <strong>not reachable from replay data</strong>: replay frames carry no manifold-pressure
+              channel and no replay fault type moves RPM, so the highest class here is <em>degradation</em>.
+            </p>
+            <div class="ml-verdict" id="mlVerdict" data-class="nominal">
+              <span class="ml-verdict-badge" id="mlVerdictBadge">nominal</span>
+              <div>
+                <div class="ml-verdict-text" id="mlVerdictText">No mission loaded.</div>
+                <div class="ml-verdict-patterns" id="mlVerdictPatterns"></div>
+              </div>
+            </div>
+            <div class="ml-kv">
+              <div class="ml-kv-item"><div class="ml-kv-key">Phase</div><div class="ml-kv-val"><span class="ml-phase-chip" id="mlPhase">--</span></div></div>
+              <div class="ml-kv-item"><div class="ml-kv-key">Anomaly tier</div><div class="ml-kv-val ml-good" id="mlAnomaly">nominal</div></div>
+            </div>
+            <div class="ml-kv" id="mlReadouts" style="margin-top:9px"></div>
+            <p class="ml-msg" id="mlAnomalyDetailMsg" hidden></p>
+            <p class="ml-msg" id="mlAnomalyDetail" style="color:#8ba0b3"></p>
+          </div>
+
+          <div class="ml-card">
+            <h3>Ground truth vs detection</h3>
+            <p class="ml-hint">What we injected, and what the two detector stacks found.</p>
+            <div class="ml-kv" id="mlEvalStats"></div>
+            <p class="ml-msg" id="mlEvalMsg" hidden></p>
+            <h3 style="margin-top:12px">Injected fault events</h3>
+            <div class="ml-table-wrap">
+              <table class="ml-table">
+                <thead><tr><th>ID</th><th>Type</th><th>Severity</th><th>Onset s</th><th>Detected s</th><th>Resolved s</th></tr></thead>
+                <tbody id="mlGroundTruth"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <footer class="footer">
     FIG. 1 — SIMULATED TELEMETRY, DEMONSTRATION BUILD (SMART INDIA HACKATHON PROTOTYPE) · NOT CONNECTED TO A REAL UAV OR FADEC BUS
   </footer>
 
@@ -230,8 +399,10 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/"}}</script>
-  <script src="js/charts.js"></script>
-  <script src="js/app.js"></script>
+<link rel="stylesheet" href="css/missionlab.css" />
+<script src="js/charts.js"></script>
+<script src="js/app.js"></script>
+<script src="js/missionlab.js"></script>
   <script type="module" src="js/twin3d.js"></script>
 </body>
 </html>

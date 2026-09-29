@@ -144,4 +144,67 @@ describe('mission replay + CAN endpoints', () => {
     assert.equal(a.json.sampleCount, b.json.sampleCount);
     assert.equal(a.json.seed, b.json.seed);
   });
+
+  test('a blank seed is auto-derived and still fully reproducible', async () => {
+    // generator.js#defaultSeed hashes missionId + duration + rate + faults +
+    // phases, so identical inputs always reproduce an identical flight and a
+    // different fault stack yields a different one. The UI labels this "auto".
+    const id = 'AUTOSEED-1';
+    const a = await request(s.port, { method: 'POST', path: '/api/mission-replay/generate', body: { missionId: id, duration: 300 } });
+    const b = await request(s.port, { method: 'POST', path: '/api/mission-replay/generate', body: { missionId: id, duration: 300 } });
+    assert.equal(a.status, 201);
+    assert.equal(a.json.seed, b.json.seed, 'the auto seed must be stable for identical inputs');
+    assert.ok(Number.isInteger(a.json.seed) && a.json.seed >= 0);
+
+    // Changing the fault stack changes the derived seed, so the two missions are
+    // genuinely different flights rather than the same one relabelled.
+    const c = await request(s.port, {
+      method: 'POST',
+      path: '/api/mission-replay/generate',
+      body: { missionId: id, duration: 300, faults: [{ type: 'overheating', onset_s: 50, duration_s: 100, severity: 'low' }] },
+    });
+    assert.notEqual(c.json.seed, a.json.seed, 'a different fault stack must derive a different seed');
+
+    // And an explicit seed always wins over the derived one.
+    const d = await request(s.port, { method: 'POST', path: '/api/mission-replay/generate', body: { missionId: id, duration: 300, seed: 7 } });
+    assert.equal(d.json.seed, 7);
+  });
+
+  test('regenerating a mission id serves the NEW mission, not the cached previous one', async () => {
+    // Regression: the record cache in loadReplayRecord() survived regeneration,
+    // so re-generating an id kept serving the old manifest/faults/telemetry and a
+    // newly injected fault was invisible through the whole API.
+    const id = 'REGEN-1';
+    const clean = await request(s.port, {
+      method: 'POST', path: '/api/mission-replay/generate', body: { missionId: id, duration: 600, seed: 1 },
+    });
+    assert.equal(clean.status, 201);
+    assert.equal(clean.json.faultEvents, 0, 'the baseline mission must have no fault events');
+    const cleanFaults = await request(s.port, { path: `/api/mission-replay/${id}/faults` });
+    assert.equal(cleanFaults.json.length, 0);
+
+    const seeded = await request(s.port, {
+      method: 'POST',
+      path: '/api/mission-replay/generate',
+      body: { missionId: id, duration: 600, seed: 2, faults: [{ type: 'overheating', onset_s: 100, duration_s: 200, severity: 'critical' }] },
+    });
+    assert.equal(seeded.status, 201);
+    assert.ok(seeded.json.faultEvents >= 1, 'the regenerated mission must report its injected fault');
+
+    // Every read path has to reflect the regeneration.
+    const manifest = await request(s.port, { path: `/api/mission-replay/${id}/manifest` });
+    assert.equal(manifest.json.seed, 2, 'the manifest must be the regenerated one, not the cached original');
+    const faults = await request(s.port, { path: `/api/mission-replay/${id}/faults` });
+    assert.ok(faults.json.length >= 1, 'the regenerated fault must be visible through the API');
+    assert.ok(faults.json.some((f) => f.type === 'overheating' && f.injected === true),
+      `expected the injected overheating event, got ${JSON.stringify(faults.json)}`);
+    // The served telemetry has to be the new one too, not just the metadata.
+    const before = await request(s.port, { path: `/api/mission-replay/${id}/state?t_s=50` });
+    const during = await request(s.port, { path: `/api/mission-replay/${id}/state?t_s=200` });
+    assert.equal(before.status, 200);
+    assert.deepEqual(before.json.fault_flags, [], 't=50s is before the injected onset');
+    assert.ok(during.json.fault_flags.length > 0, 't=200s is inside the injected overheating window');
+    assert.ok(during.json.thermal.cht_c > before.json.thermal.cht_c + 50,
+      `the overheating signature must be visible in the regenerated telemetry (${before.json.thermal.cht_c} -> ${during.json.thermal.cht_c})`);
+  });
 });

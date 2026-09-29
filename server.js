@@ -438,6 +438,8 @@ function createServer(options = {}) {
         return { phase: p.phase, start_s: p.start_s, end_s: p.end_s };
       });
     }
+    // Stop any streaming BEFORE the files are rewritten, so a running timer
+    // cannot read a half-written telemetry.jsonl.
     const existing = missionReplayPlayers.get(missionId);
     if (existing) stopMissionPlayback(existing);
 
@@ -456,7 +458,13 @@ function createServer(options = {}) {
     } catch (err) {
       throw new HttpError(400, 'generation failed', cfg.isProduction ? undefined : err.message);
     }
-    // warm the record/player cache
+    // Generation REPLACES this mission's files, so the cached record from the
+    // previous run is now stale. It has to be dropped before reloading:
+    // loadReplayRecord() returns a cached entry when it has one, so without this
+    // delete the API would keep serving the previous version's manifest, faults
+    // and telemetry and a newly injected fault would be invisible.
+    missionReplayPlayers.delete(missionId);
+    // warm the record/player cache from the freshly written files
     loadReplayRecord(missionId);
     res.status(201).json({
       missionId,
