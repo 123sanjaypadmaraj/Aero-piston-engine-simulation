@@ -158,17 +158,24 @@ sample time `t_s`, not wall-clock (no async drift).
   Lines telemetry log, `faults.json` (time-windowed events), `telemetry.idx`
   (byte offset per line so the loader can seek in O(1)), and `can.jsonl`
   when CAN recording is on.
-- **Fault injection** (`faultLib.js`) — 8 fault classes run on an
+- **Fault injection** (`faultLib.js`) — 20 fault classes run on an
   onset/detected/resolved time window with a `precursor_window_s`:
-  `oil_pressure_degradation`, `oil_starvation`, `fuel_starvation`,
+  the original `oil_pressure_degradation`, `oil_starvation`, `fuel_starvation`,
   `detonation_risk`, `vibration_anomaly`, `overheating`, `plug_fouling`,
-  `sensor_dropout`. Injection degrades a severity-multiplied parameter over
-  the window; a detection-rule table marks the `detected_s` (fires only on
-  N consecutive out-of-band samples, with margin guards so phase ramps don't
-  trip it). Events injected by the operator are `injected: true`; events
-  that emerge from the detection rules alone are `injected: false` and
-  recover automatically. Sensor dropout serialises as the
-  `OVERRANGE_SENSOR = -32000` sentinel (JSON has no NaN).
+  `sensor_dropout`, plus a second wave covering intake, ignition, drivetrain,
+  propeller and electrical families (`carburetor_icing`, `fuel_filter_blockage`,
+  `water_ingestion`, `prop_imbalance`, `bearing_wear`, `clutch_slip`,
+  `turbo_overboost`, `exhaust_leak`, `magneto_failure`, `battery_fault`,
+  `air_filter_clog`, `static_discharge`). Injection degrades a
+  severity-multiplied parameter over the window; a detection-rule table marks
+  the `detected_s` (fires only on N consecutive out-of-band samples, with
+  margin guards so phase ramps don't trip it). Rules are phase-gated where the
+  signal is phase-sensitive: low-egt/fuel-flow rules run in the flight phases
+  only, and rpm floors are expressed `min(below, target − belowOfTarget)` so a
+  takeoff spool-up never trips them. Events injected by the operator are
+  `injected: true`; events that emerge from the detection rules alone are
+  `injected: false` and recover automatically. Sensor dropout serialises as
+  the `OVERRANGE_SENSOR = -32000` sentinel (JSON has no NaN).
 - **Replay** (`replay.js`) — `stateAt(t_s)` returns an interpolated sample
   (floor-index + linear interpolation) but *snaps* cleanly across a fault
   onset/resolution boundary rather than blending, `getRange` returns
@@ -234,6 +241,14 @@ sample time `t_s`, not wall-clock (no async drift).
   fails or is cooling down, a rule-based one-line summary is cached instead
   and flagged `degraded`. Each analysis records `provider`, `fallbackUsed`
   and `degraded`.
+  An operator can also point a *single* manual re-analysis at their own
+  provider key without configuring the server: the dashboard's
+  `public/js/aiSession.js` holds the key in a page closure, sends it as
+  `x-ai-provider` / `x-ai-api-key` on
+  `POST /api/ai-analysis/:engineId/refresh`, and `server.js` builds a
+  request-scoped `ProviderPool` for that one call, then closes it. The key
+  is never written to disk, cookies, any browser storage, or the
+  process-wide pool, and it is redacted out of any log line.
 - **`replay/`** — L4: `missionRunner.js` drives `engine_sim/`'s
   `PhysicsEngine` end-to-end and persists it via `twin_core/`;
   `replayEngine.js` plays a recorded mission back out, paced by its
@@ -242,9 +257,9 @@ sample time `t_s`, not wall-clock (no async drift).
   `/control` routes start/pause/resume/seek/stop it).
 - **`missionreplay/`** — L4+ (spec-driven synthetic recorder + replay +
   artificial CAN): `profiles.js` (7-phase mission schedule, cosine transition
-  windows, per-parameter noise/clamps/lag), `faultLib.js` (8 injected fault
-  classes with time-windowed degradation and consecutive-sample detection
-  rules), `can.js` (J1939-flavoured artificial bus: 29-bit arbitration,
+  windows, per-parameter noise/clamps/lag), `faultLib.js` (20 injected fault
+  classes with time-windowed degradation and phase-gated, consecutive-sample
+  detection rules calibrated against a clean mission), `can.js` (J1939-flavoured artificial bus: 29-bit arbitration,
   11-signal PGN map, 5 nodes, byte-scale encode/decode round trip),
   `generator.js` (deterministic `generateMission({seed})` — seed from the
   mission id unless overridden; writes `manifest.json`, `telemetry.jsonl`,

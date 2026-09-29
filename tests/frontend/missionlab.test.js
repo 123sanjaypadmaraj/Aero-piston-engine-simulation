@@ -106,7 +106,7 @@ test('MISSION LAB exposes its API and is inert until the DOM is ready', () => {
     'loadMissions', 'generateMission', 'selectMission', 'refreshCan', 'refreshStatus', 'refreshAiVerdict']) {
     assert.equal(typeof lab[fn], 'function', `${fn} must be exported`);
   }
-  assert.equal(lab.FAULT_TYPES.length, 8, 'all eight fault types must be offered');
+  assert.equal(lab.FAULT_TYPES.length, 20, 'all twenty fault types must be offered');
   assert.deepEqual(host(lab.SEVERITIES), ['low', 'moderate', 'severe', 'critical']);
   assert.equal(Object.keys(lab.PRESETS).length, 2);
 });

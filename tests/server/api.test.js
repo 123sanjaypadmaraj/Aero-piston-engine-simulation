@@ -90,6 +90,46 @@ describe('core API', () => {
     const ok = await request(s.port, { method: 'POST', path: `/api/ai-analysis/${id}/refresh` });
     assert.equal(ok.status, 200);
     assert.equal(ok.json.text, 'stub');
+    const call = s.ctx.aiAnalysis.calls.find((c) => c.id === id);
+    assert.equal(call.pool, null); // no session override headers := default pool
+  });
+
+  test('AI refresh: session provider override builds a one-shot pool, not the default', async () => {
+    const snap = await request(s.port, { path: '/api/snapshot' });
+    const id = snap.json.engines[0].id;
+    const ok = await request(s.port, {
+      method: 'POST',
+      path: `/api/ai-analysis/${id}/refresh`,
+      headers: { 'x-ai-provider': 'gemini', 'x-ai-api-key': 'AIza-'.padEnd(25, 'x') },
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.json.text, 'stub');
+    const call = s.ctx.aiAnalysis.calls.find((c) => c.id === id && c.pool);
+    assert.ok(call, 'refresh must have been handed a request-scoped pool');
+    // The one-shot pool only knows the session provider; the app-wide pool is untouched.
+    assert.ok(Array.isArray(call.pool.order));
+    assert.deepEqual(call.pool.order, ['gemini']);
+  });
+
+  test('AI refresh: session override rejects unknown provider or short key', async () => {
+    const snap = await request(s.port, { path: '/api/snapshot' });
+    const id = snap.json.engines[0].id;
+    const before = s.ctx.aiAnalysis.calls.length;
+    const badProvider = await request(s.port, {
+      method: 'POST',
+      path: `/api/ai-analysis/${id}/refresh`,
+      headers: { 'x-ai-provider': 'openai', 'x-ai-api-key': 'sk-'.padEnd(25, 'x') },
+    });
+    assert.equal(badProvider.status, 400);
+    assert.equal(badProvider.json.error, 'unsupported ai provider');
+    const shortKey = await request(s.port, {
+      method: 'POST',
+      path: `/api/ai-analysis/${id}/refresh`,
+      headers: { 'x-ai-provider': 'groq', 'x-ai-api-key': 'short' },
+    });
+    assert.equal(shortKey.status, 400);
+    assert.equal(shortKey.json.error, 'invalid api key');
+    assert.equal(s.ctx.aiAnalysis.calls.length, before, 'neither rejected request reached the analysis engine');
   });
 
   test('GET /api/series validates ids', async () => {

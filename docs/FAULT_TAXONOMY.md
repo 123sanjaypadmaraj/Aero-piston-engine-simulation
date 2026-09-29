@@ -80,8 +80,20 @@ carries an injected-onset/detected/resolved timeline (with a
 | `detonation_risk` | Combustion instability | afr, egt_c | air_fuel_ratio > 15.5 (lean) for 8 consecutive samples |
 | `vibration_anomaly` | Vibration | vibration_mm_s, rpm, cht_c | vibration_mm_s > 6.0 for 5 consecutive samples |
 | `overheating` | Cooling/thermal | cht_c, egt_c, oil_temp_c | cht_c above phase target + 240 K for 3 consecutive samples |
-| `plug_fouling` | Misfire-adjacent | afr, rpm (rpm oscillation) | rpm-jerk threshold on consecutive-sample deltas |
+| `plug_fouling` | Misfire-adjacent | afr, rpm (rpm oscillation), egt_c | rpm-jerk threshold, or egt_c < 620 K in flight phases (3 consecutive) |
 | `sensor_dropout` | **Sensor failure** | none — the *reported* value goes `OVERRANGE_SENSOR` (-32000) | reported value is NaN or exactly -32000 |
+| `carburetor_icing` | Intake / ice | fuel_flow_lph, mixture_ratio, egt_c, rpm | fuel_flow_lph < 6.5 (climb/cruise/loiter, 12 consecutive) or egt_c < 620 K (6 consecutive) |
+| `fuel_filter_blockage` | Fuel system (progressive) | fuel_flow_lph, egt_c, rpm | fuel_flow_lph < 6.5 (climb/cruise/loiter, 20 consecutive) |
+| `water_ingestion` | Fuel contamination | egt_c, rpm, cht_c, vibration | egt_c > 860 K for 2 consecutive samples |
+| `prop_imbalance` | Propeller / airframe | vibration_mm_s, rpm | vibration_mm_s > 4.4 for 15 consecutive samples |
+| `bearing_wear` | Mechanical (slow) | vibration_mm_s, oil_temp_c, oil_pressure_kpa | vibration_mm_s > 4.6 for 25 consecutive, or oil_temp_c > 118 K for 20 |
+| `clutch_slip` | Drivetrain | rpm, vibration_mm_s, fuel_flow_lph | rpm below phase target − 480 (floor 1900) for 10 consecutive flight samples |
+| `turbo_overboost` | Induction (wastegate) | mixture_ratio, egt_c, cht_c, fuel_flow_lph | mixture-ratio rich > 15.3 for 10 consecutive samples |
+| `exhaust_leak` | Exhaust | egt_c, rpm, mixture_ratio | egt_c < 620 K in climb/cruise/loiter for 12 consecutive |
+| `magneto_failure` | Ignition | rpm, egt_c, vibration_mm_s | rpm < 1500 and below phase target − 620 for 3 consecutive flight samples |
+| `battery_fault` | Electrical / charging | rpm, vibration_mm_s, fuel_flow_lph | rpm < 2100 and below phase target − 330 for 12 consecutive flight samples |
+| `air_filter_clog` | Intake air restriction | mixture_ratio, egt_c, rpm | mixture-ratio rich > 15.2 for 15 consecutive samples |
+| `static_discharge` | Electrical noise | vibration_mm_s | vibration_mm_s > 6.2 for 2 consecutive samples |
 
 Notes relative to the 8-category master-plan mapping above:
 
@@ -93,10 +105,21 @@ Notes relative to the 8-category master-plan mapping above:
   the cooling-degradation, misfire and combustion-instability rows; they are
   still single-episode windows, not the persistent cross-mission coking
   state the future-work note above describes.
+- The second-wave classes (`carburetor_icing` … `static_discharge`) widen the
+  recorder to intake, ignition, drivetrain, propeller and electrical failure
+  families so replay demos and calibration runs can cover more than the
+  original eight lubrication/cooling/fuel shapes.
 - Detection rules deliberately guard against false positives during phase
   ramps: CHT-style rules compare against the *current phase's* target plus
-  a margin, and the rpm-jerk rule requires a sustained consecutive-sample
-  streak, so a normal takeoff/climb transition does not trip them.
+  a margin, rpm floors are expressed relative to the phase target
+  (`min(below, target − belowOfTarget)`), and low-signal rules (egt/fuel-flow)
+  are gated to the flight phases because taxi, takeoff and landing
+  legitimately run cold EGT, low flow and low rpm. A clean mission must
+  produce zero events — that property is enforced by
+  `scripts/calibrate-fault-rules.js` (clean-phase envelopes) and the unit
+  tests. Variance-based detectors are deliberately avoided: the first-order
+  lag makes rpm swing well outside a variance band on every phase transition,
+  so a variance detector false-fires on a clean takeoff.
 - An event can be operator-injected (`injected: true`) or simply *emerge*
   from the detection rules running over nominal-but-noisy data
   (`injected: false`) — the emergent form is what makes the log useful as

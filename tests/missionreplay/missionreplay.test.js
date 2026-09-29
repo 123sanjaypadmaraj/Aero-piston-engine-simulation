@@ -268,6 +268,24 @@ test('no false-positive emergent faults in a clean run', () => {
   assert.deepEqual(r.faults, []);
 });
 
+test('every second-wave fault type is detectably injected in a cruise window', () => {
+  const SECOND_WAVE = [
+    'carburetor_icing', 'fuel_filter_blockage', 'water_ingestion', 'prop_imbalance',
+    'bearing_wear', 'clutch_slip', 'turbo_overboost', 'exhaust_leak',
+    'magneto_failure', 'battery_fault', 'air_filter_clog', 'static_discharge',
+  ];
+  for (const type of SECOND_WAVE) {
+    // Each fault is slid forward a little so its window stays inside cruise.
+    const r = gen(`SECOND-${type}`, {
+      faults: [{ type, onset_s: 700, severity: 'critical', duration_s: 600 }],
+    });
+    const ev = r.faults.find((f) => f.type === type && f.injected);
+    assert.ok(ev, `${type}: injected event missing`);
+    assert.ok(ev.detected_s >= ev.onset_s, `${type}: not detected (detected_s=${ev.detected_s})`);
+    assert.ok(ev.detected_s <= ev.resolved_s, `${type}: detected after window end`);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Mission replay engine
 // ---------------------------------------------------------------------------

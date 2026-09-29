@@ -42,6 +42,9 @@
   const FAULT_TYPES = [
     'oil_pressure_degradation', 'oil_starvation', 'plug_fouling', 'detonation_risk',
     'overheating', 'fuel_starvation', 'vibration_anomaly', 'sensor_dropout',
+    'carburetor_icing', 'fuel_filter_blockage', 'water_ingestion', 'prop_imbalance',
+    'bearing_wear', 'clutch_slip', 'turbo_overboost', 'exhaust_leak',
+    'magneto_failure', 'battery_fault', 'air_filter_clog', 'static_discharge',
   ];
   const SEVERITIES = ['low', 'moderate', 'severe', 'critical'];
   const PHASES = ['taxi', 'takeoff', 'climb', 'cruise', 'loiter', 'descent', 'landing'];

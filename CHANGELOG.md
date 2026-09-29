@@ -6,6 +6,39 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Session-only AI provider override (`public/js/aiSession.js`, `server.js`).**
+  The dashboard's AI card gains a collapsible "Use your own AI provider" panel: pick
+  Gemini or Groq, paste a key, and the next manual re-analysis uses it. The key lives
+  only in a closure in the page, is sent as `x-ai-provider` / `x-ai-api-key` request
+  headers for that single `POST /api/ai-analysis/:engineId/refresh` call, and is
+  discarded server-side when the request finishes — it is never written to disk,
+  cookies, `localStorage`, `sessionStorage`, IndexedDB, or merged into the process-wide
+  provider pool, and it disappears when the tab closes. The request-scoped
+  `ProviderPool` also passes the literal key to `redactSecrets` so it can never reach a
+  log line. `AiAnalysisEngine.refresh()` takes an optional override pool and bypasses the
+  in-flight join so a session analysis can never be merged into a default-pool run.
+- **Second wave of mission-replay fault classes (`missionreplay/faultLib.js`).**
+  Twelve additional failure families on top of the original eight:
+  `carburetor_icing`, `fuel_filter_blockage`, `water_ingestion`,
+  `prop_imbalance`, `bearing_wear`, `clutch_slip`, `turbo_overboost`,
+  `exhaust_leak`, `magneto_failure`, `battery_fault`, `air_filter_clog`,
+  `static_discharge`. Each carries its own severity multiplier, parameter
+  degradation profile in `applyFaultValue()`, and a calibrated detection rule.
+- **Phase-aware detection-rule guards.** Low-signal rules (egt/fuel-flow) and
+  rpm floors are now gated so a clean taxi/takeoff/landing never triggers them:
+  `phases[]` restricts low-egt/fuel-flow rules to flight phases, and rpm rules
+  use `min(below, phaseTarget − belowOfTarget)`.
+- **Fault calibration script (`scripts/calibrate-fault-rules.js`).** Prints the
+  clean per-phase telemetry envelope and per-fault excursion for every class,
+  and fails if a clean mission raises any event.
+- **Unit coverage for all second-wave faults** — every new class is asserted to
+  be detectably injected inside a cruise window, and the MISSION LAB fault list
+  grows to the full 20 the generator supports.
+- **SIH 2026 slide script (`docs/SIH2026-Garuda-x-slide-script.md`).** Six-slide
+  speaking script for problem SIH26054 with the measured figures, the claim rules
+  that keep the deck honest about simulated data, and question drills.
+
 ## [1.2.0] - 2026-09-29
 
 Mission replay, an artificial J1939 CAN bus, ground-truth evaluation of the

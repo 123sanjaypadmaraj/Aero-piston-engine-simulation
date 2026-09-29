@@ -43,6 +43,8 @@ try {
 
 const { DigitalTwinFleet, SENSORS, FAULT_TYPES } = require('./simulator');
 const { AiAnalysisEngine } = require('./ai/analysisEngine');
+const { ProviderPool } = require('./ai/providers');
+const { redactSecrets } = require('./ai/aiUtil');
 const { PhysicsEngine, MISSIONS } = require('./engine_sim');
 const { FAULT_APPLICATORS } = require('./engine_sim/faults');
 const { forecastEngine, evaluateMissionReplay } = require('./analytics');
@@ -594,6 +596,37 @@ function createServer(options = {}) {
     const engineId = safeId(req.params.engineId, 'engineId');
     const engine = latest.engines.find((e) => e.id === engineId);
     if (!engine) throw new HttpError(404, 'unknown engine id');
+
+    // Session-scoped provider override: an operator can paste a provider + API
+    // key directly in the dashboard and the page sends it as request headers
+    // (see public/js/aiSession.js). The key is used for EXACTLY this one
+    // request via a throwaway ProviderPool and is discarded immediately — it is
+    // never written to disk, never stored, and never merged into the process-
+    // wide pool used by the telemetry-driven loop.
+    const sessionProvider = String(req.headers['x-ai-provider'] || '').trim().toLowerCase();
+    const sessionKey = String(req.headers['x-ai-api-key'] || '').trim();
+    if (sessionProvider || sessionKey) {
+      if (sessionProvider !== 'gemini' && sessionProvider !== 'groq') {
+        throw new HttpError(400, 'unsupported ai provider');
+      }
+      if (sessionKey.length < 8) throw new HttpError(400, 'invalid api key');
+      const keyEnv = sessionProvider === 'gemini' ? 'GEMINI_API_KEY' : 'GROQ_API_KEY';
+      const env = { ...process.env };
+      env[keyEnv] = sessionKey;
+      // Only the named provider is used; the process-wide pool is untouched.
+      env.AI_PROVIDER_ORDER = sessionProvider;
+      const log = (level, text) => logger[level](redactSecrets(text, [sessionKey]));
+      const sessionPool = new ProviderPool({
+        env,
+        logger: { log: (t) => log('log', t), warn: (t) => log('warn', t) },
+      });
+      try {
+        return res.json(await aiAnalysis.refresh(engine, latest, sessionPool));
+      } finally {
+        sessionPool.close(); // cancel any pending sleep / signal; drop the key forever
+      }
+    }
+
     res.json(await aiAnalysis.refresh(engine, latest));
   }));
 

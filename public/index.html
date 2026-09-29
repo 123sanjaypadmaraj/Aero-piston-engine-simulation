@@ -106,6 +106,25 @@
             <p id="aiReason"></p>
           </details>
           <div class="ai-meta" id="aiMeta"></div>
+          <details class="ai-session" id="aiSessionBox">
+            <summary>Use your own AI provider (session only, never stored)</summary>
+            <div class="ai-session-row">
+              <label>
+                <span>Provider</span>
+                <select id="aiSessProvider">
+                  <option value="gemini">Gemini</option>
+                  <option value="groq">Groq</option>
+                </select>
+              </label>
+              <label>
+                <span>API key</span>
+                <input type="password" id="aiSessKey" placeholder="paste key" autocomplete="off" spellcheck="false">
+              </label>
+              <button type="button" class="ai-refresh-btn" id="aiSessApply">Use for this tab</button>
+              <button type="button" class="ai-refresh-btn" id="aiSessClear" hidden>Clear</button>
+            </div>
+            <p class="ai-sess-note" id="aiSessNote">The key stays in browser memory for this tab only. It is never written to disk, cookies, localStorage, or the server, and is lost when the tab closes.</p>
+          </details>
           <p class="ai-disclaimer">Advisory only. Generated text is not a maintenance or flight-safety decision; verify against the sensor readings and follow approved procedures.</p>
         </div>
 
@@ -401,7 +420,8 @@
   <script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/"}}</script>
 <link rel="stylesheet" href="css/missionlab.css" />
 <script src="js/charts.js"></script>
-<script src="js/app.js"></script>
+  <script src="js/aiSession.js"></script>
+  <script src="js/app.js"></script>
 <script src="js/missionlab.js"></script>
   <script type="module" src="js/twin3d.js"></script>
 </body>

@@ -196,8 +196,15 @@ class AiAnalysisEngine {
     }
   }
 
-  /** On-demand analysis for one engine, bypassing the interval throttle. */
-  refresh(engine, fleetSnapshot) {
+  /**
+   * On-demand analysis for one engine, bypassing the interval throttle.
+   * @param {object}  [overridePool]  optional ProviderPool used for exactly this
+   *   one analysis and discarded afterwards (session-scoped operator key); when
+   *   given, the call bypasses the _analyze in-flight join so it can never be
+   *   merged into a default-pool run for the same engine.
+   */
+  refresh(engine, fleetSnapshot, overridePool = null) {
+    if (overridePool) return this._run(engine, fleetSnapshot, severityKey(engine), overridePool);
     return this._analyze(engine, fleetSnapshot, severityKey(engine), true);
   }
 
@@ -211,8 +218,9 @@ class AiAnalysisEngine {
     return job;
   }
 
-  async _run(engine, fleetSnapshot, sevKey) {
+  async _run(engine, fleetSnapshot, sevKey, pool = null) {
     const id = engine && engine.id;
+    const usePool = pool || this.pool;
     let contextDocs = [];
     // Computed before the try so BOTH the success and the fallback branch can
     // attach it: the safety floor must survive provider failure.
@@ -220,7 +228,7 @@ class AiAnalysisEngine {
     try {
       contextDocs = retrieveContext(engine);
       const prompt = buildPrompt(engine, fleetSnapshot, contextDocs, verdict);
-      const result = await this.pool.generate(prompt);
+      const result = await usePool.generate(prompt);
       this._retryAt.delete(id);
       return this._store(id, {
         text: result.text,

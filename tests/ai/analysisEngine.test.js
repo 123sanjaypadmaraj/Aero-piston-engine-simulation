@@ -155,6 +155,37 @@ test('a forced refresh joins the analysis already in flight', async (t) => {
   ai.close();
 });
 
+test('refresh with a session override pool uses that pool and never the default', async (t) => {
+  // The throwaway provider pool (as built by server.js for the session-only key)
+  // must be the one queried, and a default-pool analysis for the same engine must
+  // NOT be joined or share the override's key.
+  const net = mockFetch({
+    gemini: geminiOk('override pool answered'),
+    groq: groqOk('default pool answered'),
+  });
+  t.after(net.restore);
+  const clock = fakeClock();
+  const ProviderPool = require('../../ai/providers').ProviderPool;
+  const sessionKey = 'AIza-'.padEnd(25, 'x'); // not the env key — override only
+  const sessionPool = new ProviderPool({
+    env: { GEMINI_API_KEY: sessionKey, AI_PROVIDER_ORDER: 'gemini' },
+    config: { gaps: { gemini: 0, groq: 0 } },
+    now: clock.now, sleep: clock.sleep, logger: silentLogger(),
+  });
+  const { ai } = makeEngine({ env: bothKeys() }); // default pool has both env keys
+  const r = await ai.refresh(engineSnap(), fleetSnap(), sessionPool);
+  assert.equal(r.provider, 'gemini');
+  assert.equal(r.text, 'override pool answered');
+  assert.equal(net.calls.length, 1);
+  assert.equal(net.calls[0].headers['x-goog-api-key'], sessionKey, 'override key used, not the env key');
+  // A second (default) refresh on the same engine goes through the default pool.
+  const r2 = await ai.refresh(engineSnap(), fleetSnap());
+  assert.equal(r2.provider, 'gemini');
+  assert.equal(net.calls.length, 2);
+  sessionPool.close();
+  ai.close();
+});
+
 test('close() stops emitting and does not hang on a pending gap sleep', async (t) => {
   const net = mockFetch({ gemini: geminiOk('x') });
   t.after(net.restore);
