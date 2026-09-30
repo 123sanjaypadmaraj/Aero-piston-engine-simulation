@@ -210,9 +210,11 @@ sample time `t_s`, not wall-clock (no async drift).
 ## Module responsibilities (current + planned)
 
 - **`simulator.js`** — today's L0/L1: per-engine true-state random walk,
-  four fault scenarios (`FAULT_TYPES`), threshold classification, rolling
+  nine fault scenarios (`FAULT_TYPES`) over 13 sensors (`SENSORS`), threshold
+  classification, rolling
   z-score anomaly scoring, rule-based health/RUL/predicted-fault
-  computation, alert generation. See `docs/FAULT_TAXONOMY.md` and
+  computation, alert generation. See `docs/MASTER.md` §7/§8 (authoritative —
+  `docs/FAULT_TAXONOMY.md` predates the later fault families) and
   `docs/MODEL_CARDS.md`.
 - **`engine_sim/`** — mean-value physics engine model, ISA-based altitude
   derating, mission-profile drivers, parametrized degradation-curve fault

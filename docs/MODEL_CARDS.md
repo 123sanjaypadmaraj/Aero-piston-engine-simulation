@@ -1,5 +1,13 @@
 # Model Cards
 
+> **Partially stale — read with `docs/MASTER.md` §11.** The `analytics/` card
+> below (§2) was written prescriptively and still describes some models as
+> "intended". They are in fact implemented: Isolation Forest, a trained RUL
+> regressor (`analytics/models/rul-regressor.json`), SHAP attribution,
+> rainflow/Miner fatigue life with Monte Carlo scatter, and a trend forecast.
+> The per-module inventory in `docs/MASTER.md` §11.2 is verified against
+> `analytics/index.js` and is authoritative.
+
 ## 1. Rule + rolling z-score health/RUL model (`simulator.js`)
 
 **Status:** implemented, running today.
@@ -11,7 +19,7 @@
   training data, no fit step, and no held-out evaluation set; all constants
   (penalty weights, z-score thresholds, RUL decay rate) are hard-coded in
   `computeHealthAndPrediction()`.
-- **Inputs:** the 9 current sensor readings, their nominal/warning/critical
+- **Inputs:** the 13 current sensor readings, their nominal/warning/critical
   classification (`classify()`), and a rolling z-score per sensor computed
   over the last 30 samples (`HISTORY_WINDOW`, ~60s of history at the 2s tick).
 - **Outputs:** `health` (100 minus accumulated penalty, clamped 0–100),

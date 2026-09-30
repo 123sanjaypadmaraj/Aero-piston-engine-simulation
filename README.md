@@ -10,10 +10,10 @@ engine health, predicted faults, and mission reliability on a live dashboard.
 ## Screenshots
 
 **Live dashboard** — fleet-wide mission reliability, per-engine health rings, the
-9-sensor grid with live status colouring, trend charts, and the fault prediction
+13-sensor grid with live status colouring, trend charts, and the fault prediction
 / alert feed.
 
-![Live dashboard showing fleet mission reliability, per-engine health rings, the 9-sensor grid with live status colouring, trend charts, and the fault prediction / alert feed.](docs/screenshots/live-dashboard.png)
+![Live dashboard showing fleet mission reliability, per-engine health rings, the 13-sensor grid with live status colouring, trend charts, and the fault prediction / alert feed.](docs/screenshots/live-dashboard.png)
 
 **3D digital twin** — the same live telemetry driving the three.js boxer engine,
 with component glow, flow layers, and the internals view.
@@ -23,11 +23,14 @@ with component glow, flow layers, and the internals view.
 ## What it does
 
 - **Backend (`server.js` + `simulator.js`)** — a Node/Express server that
-  generates realistic, continuously-varying telemetry for 9 sensors per
+  generates realistic, continuously-varying telemetry for 13 sensors per
   engine (RPM, cylinder head temp, exhaust gas temp, oil pressure/temp, fuel
-  flow, vibration, manifold pressure, battery voltage), occasionally injects
-  one of four fault scenarios (thermal overload, oil pressure loss,
-  mechanical imbalance/vibration, fuel system degradation), and streams it
+  flow, vibration, manifold pressure, battery voltage, air-fuel ratio,
+  injector pulse width, injection timing, alternator current), occasionally
+  injects one of nine fault scenarios (thermal overload, oil pressure loss,
+  mechanical imbalance/vibration, fuel system degradation, sensor drift/failure,
+  cooling & coking degradation, injector abnormality, misfire, combustion
+  instability), and streams it
   over **Socket.IO** every 2 seconds. This stands in for the real UAV
   telemetry downlink / FADEC bus.
 - **Fault prediction** — a lightweight statistical model (rolling
@@ -148,6 +151,8 @@ Base URL `http://localhost:5000`. Errors are JSON: `{ "error": "...", "detail"?:
 | `GET /api/alerts` | Recent alerts |
 | `GET /api/meta` | Sensor and fault metadata |
 | `GET /api/series/:engineId` | Per-engine time series (e.g. `uav-01`) |
+| `GET /api/history/:engineId` | Live in-memory reading history and per-sensor stats for one engine |
+| `GET /api/maintenance` | Fleet-wide maintenance recommendation roll-up |
 | `GET /api/ai-analysis` | AI situation reports, all engines |
 | `GET /api/ai-analysis/:engineId` | AI situation report, one engine |
 | `POST /api/ai-analysis/:engineId/refresh` | Force a fresh AI analysis now (*heavy*, admin key if configured) |
@@ -487,10 +492,14 @@ SIH/
   broadcast, and dashboard should need few changes (the data contract is
   the per-engine snapshot shape).
 - **Prototype status.** This is a hackathon prototype for advisory/demo use.
-  None of its models (rolling z-score, Mahalanobis anomaly detection, RUL,
-  LLM narratives) has been validated against real engine data, and it is not
-  certified or intended as a safety-of-flight system. See `docs/MODEL_CARDS.md`
-  and `docs/ROADMAP.md`.
+  None of its models (rolling z-score, Mahalanobis anomaly detection, Isolation
+  Forest, RUL, fatigue life, LLM narratives) has been validated against real
+  engine data, and it is not certified or intended as a safety-of-flight
+  system. See `docs/MASTER.md` §23 and `docs/ROADMAP.md`.
+- **Known dependency finding.** `npm audit` reports 2 moderate advisories in
+  `qs`, pulled in transitively by `express` 4.22.2 (array-limit bypass via
+  bracket-key comma parsing; DoS via attacker-controlled `isBuffer`).
+  Remediation is `npm audit fix`. CI runs the audit non-blocking.
 - **Operating it.** See `docs/DEPLOYMENT.md` (Docker, reverse proxy, TLS,
   backups, scaling) and `docs/OPERATIONS.md` (probes, logs, troubleshooting);
   release notes are in `CHANGELOG.md`.
@@ -499,3 +508,4 @@ SIH/
   libraries (9 live + 20 replay classes), the complete API, the models and
   their limits, deployment, operations and the roadmap — plus a section
   recording where the other docs had drifted out of date versus the code.
+  **If you only read one document, read that one.**
