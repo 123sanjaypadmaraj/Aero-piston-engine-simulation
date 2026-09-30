@@ -190,11 +190,18 @@
     return keyPrompt;
   }
 
-  async function apiFetch(path, { method = 'GET', body, timeoutMs = FETCH_TIMEOUT_MS, retryAuth = true } = {}) {
+  async function apiFetch(path, { method = 'GET', body, timeoutMs = FETCH_TIMEOUT_MS, retryAuth = true, aiSession = false } = {}) {
     const headers = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const key = readKey();
     if (key && method !== 'GET') headers['x-api-key'] = key;
+    // Session-scoped AI provider override (see aiSession.js + the "Use your own
+    // AI provider" panel). Memory-only: the key rides in HEADERS for this one
+    // request and is never stored by the page; the server uses it once and
+    // discards it.
+    if (aiSession && window.DtAiSession && window.DtAiSession.active()) {
+      Object.assign(headers, window.DtAiSession.headers());
+    }
 
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs); // covers headers + body
@@ -508,6 +515,50 @@
     btn.setAttribute('aria-busy', String(state.aiBusy));
   }
 
+  // "Use your own AI provider" — session-scoped, memory-only override. The key
+  // is held in a page closure (DtAiSession), never persisted, and only ever sent
+  // as a request header for a manual re-analysis. See aiSession.js.
+  function updateSessionNote() {
+    const note = el('aiSessNote');
+    const clear = el('aiSessClear');
+    const apply = el('aiSessApply');
+    if (!note || !clear || !apply) return;
+    const active = window.DtAiSession && window.DtAiSession.active();
+    clear.hidden = !active;
+    apply.textContent = active
+      ? `Active: ${window.DtAiSession.provider().toUpperCase()} (session only)`
+      : 'Use for this tab';
+    note.textContent = active
+      ? 'Provider override is active for THIS tab only. The key lives in browser memory, is sent only to our server for the next "Explain now", is never stored, and disappears when you close the tab.'
+      : 'The key stays in browser memory for this tab only. It is never written to disk, cookies, localStorage, or the server, and is lost when the tab closes.';
+  }
+
+  function bindSessionAi() {
+    const apply = el('aiSessApply');
+    const clear = el('aiSessClear');
+    const providerEl = el('aiSessProvider');
+    const keyEl = el('aiSessKey');
+    if (!apply || !clear || !providerEl || !keyEl || !window.DtAiSession) return;
+    apply.addEventListener('click', () => {
+      const ok = window.DtAiSession.set(providerEl.value, keyEl.value);
+      if (ok) {
+        keyEl.value = '';
+        toast('Session AI provider set. The key is never stored.', { kind: 'info', key: 'ai-sess' });
+      } else {
+        toast('Please enter a valid API key (at least 8 characters).', { kind: 'error', key: 'ai-sess' });
+      }
+      updateSessionNote();
+    });
+    clear.addEventListener('click', () => {
+      window.DtAiSession.clear();
+      keyEl.value = '';
+      providerEl.value = 'gemini';
+      toast('Session AI provider cleared.', { kind: 'info', key: 'ai-sess' });
+      updateSessionNote();
+    });
+    updateSessionNote();
+  }
+
   function bindRefreshButton() {
     el('aiRefreshBtn').addEventListener('click', async () => {
       const id = state.selectedEngineId;
@@ -515,7 +566,7 @@
       state.aiBusy = true;
       updateRefreshButton();
       try {
-        const analysis = await apiFetch(`/api/ai-analysis/${encodeURIComponent(id)}/refresh`, { method: 'POST', timeoutMs: REFRESH_TIMEOUT_MS });
+        const analysis = await apiFetch(`/api/ai-analysis/${encodeURIComponent(id)}/refresh`, { method: 'POST', timeoutMs: REFRESH_TIMEOUT_MS, aiSession: true });
         if (analysis && typeof analysis === 'object') {
           state.aiOverride[id] = analysis;
           const view = classifyAnalysis(analysis);
@@ -906,6 +957,7 @@
   });
 
   bindRefreshButton();
+  bindSessionAi();
 
   // Browsers throttle hidden tabs; resync as soon as the tab is visible again.
   const onVisibility = () => {

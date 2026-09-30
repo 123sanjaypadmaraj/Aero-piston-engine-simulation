@@ -4,9 +4,69 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] - mission replay & artificial CAN
+## [Unreleased]
 
 ### Added
+- **Session-only AI provider override (`public/js/aiSession.js`, `server.js`).**
+  The dashboard's AI card gains a collapsible "Use your own AI provider" panel: pick
+  Gemini or Groq, paste a key, and the next manual re-analysis uses it. The key lives
+  only in a closure in the page, is sent as `x-ai-provider` / `x-ai-api-key` request
+  headers for that single `POST /api/ai-analysis/:engineId/refresh` call, and is
+  discarded server-side when the request finishes — it is never written to disk,
+  cookies, `localStorage`, `sessionStorage`, IndexedDB, or merged into the process-wide
+  provider pool, and it disappears when the tab closes. The request-scoped
+  `ProviderPool` also passes the literal key to `redactSecrets` so it can never reach a
+  log line. `AiAnalysisEngine.refresh()` takes an optional override pool and bypasses the
+  in-flight join so a session analysis can never be merged into a default-pool run.
+- **Second wave of mission-replay fault classes (`missionreplay/faultLib.js`).**
+  Twelve additional failure families on top of the original eight:
+  `carburetor_icing`, `fuel_filter_blockage`, `water_ingestion`,
+  `prop_imbalance`, `bearing_wear`, `clutch_slip`, `turbo_overboost`,
+  `exhaust_leak`, `magneto_failure`, `battery_fault`, `air_filter_clog`,
+  `static_discharge`. Each carries its own severity multiplier, parameter
+  degradation profile in `applyFaultValue()`, and a calibrated detection rule.
+- **Phase-aware detection-rule guards.** Low-signal rules (egt/fuel-flow) and
+  rpm floors are now gated so a clean taxi/takeoff/landing never triggers them:
+  `phases[]` restricts low-egt/fuel-flow rules to flight phases, and rpm rules
+  use `min(below, phaseTarget − belowOfTarget)`.
+- **Fault calibration script (`scripts/calibrate-fault-rules.js`).** Prints the
+  clean per-phase telemetry envelope and per-fault excursion for every class,
+  and fails if a clean mission raises any event.
+- **Unit coverage for all second-wave faults** — every new class is asserted to
+  be detectably injected inside a cruise window, and the MISSION LAB fault list
+  grows to the full 20 the generator supports.
+- **SIH 2026 slide script (`docs/SIH2026-Garuda-x-slide-script.md`).** Six-slide
+  speaking script for problem SIH26054 with the measured figures, the claim rules
+  that keep the deck honest about simulated data, and question drills.
+
+## [1.2.0] - 2026-09-29
+
+Mission replay, an artificial J1939 CAN bus, ground-truth evaluation of the
+detectors, a deterministic safety verdict for the AI box, and MISSION LAB — an
+operator console that puts all of it behind buttons. Telemetry remains fully
+simulated and the models remain unvalidated against real engines.
+
+### Added
+- **Deterministic combined-signature verdict (`ai/retriever.js`).**
+  `classifySignature()` separates the accident class from mere degradation using
+  the knowledge base's combined patterns rather than single-channel severity, and
+  is wired into `ai/analysisEngine.js` as a safety floor the LLM must respect.
+  It is computed locally before any provider call, so it is identical with or
+  without an AI key, and is attached to both successful and degraded results.
+  Only `warning`/`critical` count as off-nominal, so empty, null, unknown and
+  healthy status maps can no longer manufacture an accident.
+- **MISSION LAB** (`public/js/missionlab.js`, `public/css/missionlab.css`): a
+  collapsed-by-default panel that surfaces the 11 mission-replay routes, the CAN
+  bus, the AI box verdict, and the ground-truth evaluation the dashboard never
+  reached. Fault injection (8 types x 4 severities, two presets), generation,
+  a mission library, play/pause/seek/scrub/speed transport, per-channel readouts,
+  a phase bar, the anomaly overlay, precision/recall/F1 per detector, and live
+  CAN frame decode. Ships additively inside one `<details>` block and is inert
+  until `DOMContentLoaded`.
+- **Mission replay client tests** (`tests/frontend/missionlab.test.js`, 24
+  cases) in a `node:vm` DOM stub: classifier behaviour, preset symmetry, the
+  index.html element contract, and an assertion that the module never touches a
+  non-`ml`-prefixed id.
 - **Spec-driven mission replay (`missionreplay/`).** A deterministic,
   operator-seeded synthetic recorder: `generateMission({seed})` writes
   `manifest.json` (schema "1.0"), `telemetry.jsonl`, `faults.json`,
@@ -28,7 +88,9 @@ All notable changes to this project are documented here. The format follows
   injected ground truth. Output: sample-level precision/recall/F1 per
   detector, per-fault detection latency, a margin sweep, and emergent
   (false-alarm) events. Exposed at `GET /api/mission-replay/:missionId/
-  evaluation` and as `scripts/evaluate-missionreplay.js`.
+  evaluation` and as `scripts/evaluate-missionreplay.js`. This is the piece that
+  makes the detectors falsifiable: an injected fault that nobody detects is a
+  visible number, not an opinion.
 - **Artificial J1939 CAN bus (`missionreplay/can.js`).** 29-bit arbitration
   IDs, 11-signal PGN map, 5 nodes, uint16 byte-scale encode/decode round trip,
   bounded receive ring buffer with dropped-frame accounting. Wired to
@@ -39,10 +101,52 @@ All notable changes to this project are documented here. The format follows
 - **Tests:** `tests/missionreplay/missionreplay.test.js` (32 cases:
   determinism, manifest, idx seek, interpolation, fault-boundary snapping,
   3-tier anomaly overlay, CAN round trip/status),
-  `tests/server/missionReplay.test.js` (12 HTTP cases incl. the evaluation
-  endpoint) and `tests/analytics/missionReplayMetrics.test.js` (7 cross-
+  `tests/server/missionReplay.test.js` (14 HTTP cases incl. the evaluation
+  endpoint, regeneration invalidation and auto-seed reproducibility) and
+  `tests/analytics/missionReplayMetrics.test.js` (7 cross-
   pipeline cases: self-calibrated scoring, clean-mission quietness,
   determinism, dropout latency, margin sensitivity). Full suite green, lint clean.
+
+### Changed
+- `classifySignature()` and the MISSION LAB verdict mirror now share one severity
+  rule, so "off-nominal" always means `warning | critical` and never truthiness.
+  Previously a non-empty status string for an unknown channel counted as
+  off-nominal and could escalate degradation to accident.
+- MISSION LAB's replay bands are derived from the generator's own
+  `PHASE_PROFILES` targets and `PARAM_DEFS` sigma rather than hand-picked
+  constants, and a phase's envelope spans its neighbours' targets so a channel
+  ramping between two phases is not misread. `scripts/calibrate-missionlab-bands.js`
+  reproduces the calibration; a clean mission now scores zero off-nominal
+  samples across its whole flight (it previously produced 440 false alarms).
+- MISSION LAB labels the accident class as unreachable from replay data, and
+  says why: a replay frame carries no manifold-pressure channel and no replay
+  fault type moves RPM, so the highest class the mirror can reach is
+  degradation. The accident demo lives on the live-fleet verdict card, where the
+  simulator does drive RPM and manifold pressure.
+
+### Fixed
+- `POST /api/mission-replay/generate` no longer leaves a stale record cached.
+  Regenerating an existing `missionId` returned a fresh manifest and fault list
+  but the read routes kept serving the previous run from the in-process player
+  cache, so a re-injected fault was invisible through the whole API. The cache
+  entry is now dropped after a successful write.
+- MISSION LAB step-back sends a seek one sample earlier instead of `step: -1`,
+  which the server rejected with HTTP 400 (control values are validated in
+  `[1, 10000]`), making the ◀ button a no-op.
+- MISSION LAB's two presets actually inject their faults. They were written with
+  the server's `onset_s`/`duration_s` keys while the form rows read
+  `onset`/`duration`, so both presets generated completely faultless missions
+  while showing three fault rows in the UI.
+- MISSION LAB's clock and scrubber read the resolved instant (`state.t_s`) rather
+  than a top-level `t_s`, which `mission-replay-frame` socket payloads do not
+  carry — both rendered `undefined` during live playback.
+- MISSION LAB's mission list no longer prints the server's absolute filesystem
+  path for each mission, and the CAN frame list is capped at the newest 24
+  frames so a running playback does not bury the rest of the panel.
+- MISSION LAB's seed field is labelled `auto` rather than `random` or
+  `deterministic`: a blank seed is derived by hashing mission id, duration, rate,
+  fault stack and phase schedule, so identical inputs reproduce an identical
+  flight and any change to them yields a different one.
 
 ## [1.1.0] - 2026-09-19
 

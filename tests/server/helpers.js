@@ -11,7 +11,10 @@ function stubAi() {
     latest: () => null,
     allLatest: () => ({}),
     onFleetTick: () => {},
-    refresh: async (engine) => { calls.push(engine.id); return { text: 'stub', engineId: engine.id }; },
+    refresh: async (engine, _fleet, pool) => {
+      calls.push({ id: engine.id, pool: pool || null });
+      return { text: 'stub', engineId: engine.id };
+    },
   };
 }
 

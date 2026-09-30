@@ -42,7 +42,7 @@
 
 'use strict';
 
-const { retrieveContext } = require('./retriever');
+const { retrieveContext, classifySignature } = require('./retriever');
 const { ProviderPool } = require('./providers');
 const { redactSecrets, readNonNegInt, truncate } = require('./aiUtil');
 
@@ -61,13 +61,26 @@ function severityKey(engineSnapshot) {
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const fmt = (v, suffix = '') => (isNum(v) ? `${v}${suffix}` : 'unknown');
 
-function buildPrompt(engineSnapshot, fleetSnapshot, contextDocs) {
+function buildPrompt(engineSnapshot, fleetSnapshot, contextDocs, verdict) {
   const engine = engineSnapshot || {};
   const fleet = (fleetSnapshot && fleetSnapshot.fleet) || {};
   const docs = Array.isArray(contextDocs) ? contextDocs : [];
   const knowledge = docs.length
     ? docs.map((doc) => `- ${doc.title}: ${truncate(doc.text, MAX_DOC_CHARS)}`).join('\n')
     : '- (no specific domain notes matched; rely on the telemetry below)';
+
+  // The deterministic verdict is a safety floor computed locally from the
+  // knowledge base, NOT an LLM opinion. It is handed to the model as a
+  // constraint so the narrative can never contradict the classification the
+  // operator is already shown in the UI. The LLM explains; it never decides.
+  const verdictBlock = verdict && verdict.className
+    ? `
+DETERMINISTIC FAULT VERDICT (computed locally from the knowledge base — treat as authoritative, do not contradict it):
+- Classification: ${verdict.className}
+- Matched pattern(s): ${(verdict.patternIds && verdict.patternIds.length) ? verdict.patternIds.join(', ') : 'none'}
+- Rationale: ${(verdict.evidence && verdict.evidence.length) ? verdict.evidence.join('; ') : 'no combined off-nominal signature'}
+`
+    : '';
 
   const telemetry = {
     tail: engine.tail,
@@ -91,7 +104,7 @@ Explain the CURRENT situation of this engine to a flight-ops officer in plain, c
 
 Relevant domain knowledge retrieved for this specific situation:
 ${knowledge}
-
+${verdictBlock}
 Live telemetry snapshot (JSON):
 ${JSON.stringify(telemetry, null, 2)}
 
@@ -183,8 +196,15 @@ class AiAnalysisEngine {
     }
   }
 
-  /** On-demand analysis for one engine, bypassing the interval throttle. */
-  refresh(engine, fleetSnapshot) {
+  /**
+   * On-demand analysis for one engine, bypassing the interval throttle.
+   * @param {object}  [overridePool]  optional ProviderPool used for exactly this
+   *   one analysis and discarded afterwards (session-scoped operator key); when
+   *   given, the call bypasses the _analyze in-flight join so it can never be
+   *   merged into a default-pool run for the same engine.
+   */
+  refresh(engine, fleetSnapshot, overridePool = null) {
+    if (overridePool) return this._run(engine, fleetSnapshot, severityKey(engine), overridePool);
     return this._analyze(engine, fleetSnapshot, severityKey(engine), true);
   }
 
@@ -198,13 +218,17 @@ class AiAnalysisEngine {
     return job;
   }
 
-  async _run(engine, fleetSnapshot, sevKey) {
+  async _run(engine, fleetSnapshot, sevKey, pool = null) {
     const id = engine && engine.id;
+    const usePool = pool || this.pool;
     let contextDocs = [];
+    // Computed before the try so BOTH the success and the fallback branch can
+    // attach it: the safety floor must survive provider failure.
+    const verdict = classifySignature(engine);
     try {
       contextDocs = retrieveContext(engine);
-      const prompt = buildPrompt(engine, fleetSnapshot, contextDocs);
-      const result = await this.pool.generate(prompt);
+      const prompt = buildPrompt(engine, fleetSnapshot, contextDocs, verdict);
+      const result = await usePool.generate(prompt);
       this._retryAt.delete(id);
       return this._store(id, {
         text: result.text,
@@ -214,6 +238,7 @@ class AiAnalysisEngine {
         degraded: false,
         generatedAt: this._now(),
         severityKey: sevKey,
+        verdict,
         sources: contextDocs.map((d) => d.title),
         error: null,
         cooldownUntil: result.cooldownUntil ?? null,
@@ -238,6 +263,7 @@ class AiAnalysisEngine {
         degraded: true,
         generatedAt: now,
         severityKey: sevKey,
+        verdict,
         sources: [],
         error: reason,
         cooldownUntil,
