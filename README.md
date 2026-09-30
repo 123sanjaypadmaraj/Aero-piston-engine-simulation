@@ -7,6 +7,19 @@ This prototype simulates a fleet of 3 UAVs (Rotax-912-class piston engines),
 streams spoofed sensor telemetry from a backend in real time, and visualizes
 engine health, predicted faults, and mission reliability on a live dashboard.
 
+## Screenshots
+
+**Live dashboard** — fleet-wide mission reliability, per-engine health rings, the
+9-sensor grid with live status colouring, trend charts, and the fault prediction
+/ alert feed.
+
+![Live dashboard showing fleet mission reliability, per-engine health rings, the 9-sensor grid with live status colouring, trend charts, and the fault prediction / alert feed.](docs/screenshots/live-dashboard.png)
+
+**3D digital twin** — the same live telemetry driving the three.js boxer engine,
+with component glow, flow layers, and the internals view.
+
+![3D digital twin close-up of the boxer engine, driven by live telemetry with component glow and airflow / fuel / exhaust / oil flow layers.](docs/screenshots/twin-3d.png)
+
 ## What it does
 
 - **Backend (`server.js` + `simulator.js`)** — a Node/Express server that
