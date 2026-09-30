@@ -494,3 +494,8 @@ SIH/
 - **Operating it.** See `docs/DEPLOYMENT.md` (Docker, reverse proxy, TLS,
   backups, scaling) and `docs/OPERATIONS.md` (probes, logs, troubleshooting);
   release notes are in `CHANGELOG.md`.
+- **Everything in one document.** `docs/MASTER.md` is a single
+  self-contained reference covering architecture, all 13 sensors, both fault
+  libraries (9 live + 20 replay classes), the complete API, the models and
+  their limits, deployment, operations and the roadmap — plus a section
+  recording where the other docs had drifted out of date versus the code.
